@@ -4,6 +4,25 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-10 (late night) — V2 radio PAUSED: V1 hybrid restored
+
+**State: FM DSP back on the Pi, publishing to the rack Icecast (0.25 Mbps
+paced TCP — the V1 traffic profile). Public /fm.mp3 200 via NPM→.82.
+Scanner stays V2. User decision after the transit-loss root cause.**
+
+- Root cause of the unusable V2 FM audio (via UniFi controller DB): the Pi
+  shares the attic camera flex with 8 cameras (~124 Mbps) + an HDHomeRun;
+  the flex's 1G uplink tail-drops SoapyRemote's line-rate IQ microbursts
+  (cameras = paced TCP, unaffected; ICMP clean; V1 audio = 0.5 Mbps, never
+  noticed). Neighbor link is 1G by design — not a negotiation fault.
+- Restore: rack FM units disabled (.84 stays fully provisioned); Pi
+  sdr-fm@active unmasked/enabled, sdr-source@dx-r2 disabled, stream.sh
+  publish host env-able (ICECAST_HOST=192.168.6.82; mirrored to the radio
+  repo, branch fix-fm-device-loss-selfheal). Pi captions re-enabled.
+- **Unpause trigger: dedicated attic run to the aggregation switch** (user
+  plans a new pull). Then re-cutover = the documented switch steps; also
+  consider `tc fq maxrate` pacing on the Pi as belt-and-braces.
+
 ## 2026-06-10 (night) — RDS verdict + radio GUI on the rack
 
 **State: sdr-tuner UI live at 192.168.6.84:8080 (V1 contract, app.py

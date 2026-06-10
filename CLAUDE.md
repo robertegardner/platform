@@ -9,22 +9,31 @@ lives in the sibling repos `radio` (v2) and `scanner` (v2); this repo owns the
 device registry, the source/mount contracts, and the Terraform that stands the
 whole thing up.
 
-## Current state (2026-06-10, both domains cut over)
+## Current state (2026-06-10 night: V2 radio PAUSED — V1 hybrid restored)
 
-- **The Pi is now a pure acquisition node.** `sdr-source@dx-r2` (:55001) and
-  `sdr-source@rtl-2838` (:55005) enabled at boot; ALL V1 DSP retired
-  (`sdr-fm@active` disabled+**masked** — the tuner UI's restart path must not
-  fight the source server; SDRTrunk off via `SCHEDULER_EMS_DEFAULT=false`).
-- **P25 LIVE on scanner-compute** (LXC **901**, .83): op25 on the interim
-  `rtl-2838` device → rack `/ems.mp3`. Interim-dark:
-  `/ems-{fire,police,interop}`, `/monitor.mp3`, EMS transcripts.
-- **FM + tuner UI LIVE on radio-compute** (LXC **902**, .84): V1 sdr-streams
-  contract (`/etc/sdr-streams/active.env` + `sdr-fm@active` running the rack
-  `stream.sh`, wbfm only — HD/AM exit 78 pending radio-repo v2). The sdr-tuner
-  Flask UI (:8080) and `sdr-captions` run here, app code deployed from the
-  radio repo checkout (its deploy.sh still targets the Pi — follow-up).
-  RDS: healthy chain (KGMO decodes richly); 99.3's RDS is just weak/sparse.
-  Scanner UI = op25 console on .83:8080.
+- **RADIO = V1 hybrid:** DSP back on the Pi (`sdr-fm@active` unmasked,
+  enabled; `sdr-source@dx-r2` disabled — the V1 radio owns the dx-R2 again),
+  but it **publishes to the rack Icecast** (`ICECAST_HOST=192.168.6.82` in
+  the Pi's active.env; stream.sh host is env-able, mirrored into the radio
+  repo). Pi `sdr-captions` re-enabled. Rack FM units on .84 all disabled
+  (`sdr-fm@active`, `fm-watch.timer`, `sdr-tuner`, `sdr-captions`).
+  **WHY:** raw-IQ-over-network is unusable on the current topology — the Pi
+  shares the attic camera flex whose 1G uplink carries 8 cameras + an
+  HDHomeRun; SoapyRemote's line-rate microbursts tail-drop there (full
+  diagnosis in deployment_notes.md). **Unpause when the dedicated attic run
+  to the aggregation switch exists**; the V2 re-cutover is the documented
+  switch steps (everything stays provisioned on .84).
+- **P25 stays V2 on scanner-compute** (LXC **901**, .83): op25 on the interim
+  `rtl-2838` (:55005, enabled at boot) → rack `/ems.mp3` — its 38 Mbps CU8
+  survives the shared uplink acceptably. Interim-dark:
+  `/ems-{fire,police,interop}`, `/monitor.mp3`, EMS transcripts. Scanner
+  rollback path (if ever needed): SCHEDULER_EMS_DEFAULT=true + disable
+  sdr-source@rtl-2838 + stop op25-ems/ems-stream.
+- **Distribution:** `icecast.rg2.io` → rack (.82) via NPM; both mounts
+  rack-served (`/fm.mp3` published FROM the Pi, `/ems.mp3` from .83). The
+  Pi's icecast2 + its two relay blocks are now redundant (kept, harmless).
+  Pi wlan0 is OFF (ARP flux — never re-enable on this wired node).
+  RDS on 99.3 is weak/sparse (station-side, not a defect).
 - **Distribution:** rack Icecast on LXC **900** (.82) sources BOTH mounts.
   `icecast.rg2.io` proxies to the **Pi's** Icecast, which carries on-demand
   relays for `/fm.mp3` + `/ems.mp3` (marked `platform-cutover` in
