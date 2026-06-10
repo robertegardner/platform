@@ -211,11 +211,15 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
    `fm-watch.timer`), verify; add `tc fq maxrate` pacing on the Pi as
    belt-and-braces. Then the stereo mux (radio repo v2) targets .84.
 
-## NPM proxy map (user-managed, as of 2026-06-10)
+## NPM proxy map (user-managed; TARGET state for the Android app — see
+## deployment_notes "Android app integration")
 
 - `icecast.rg2.io` → 192.168.6.82:8000 (rack Icecast — all public audio)
 - `scanner.rg2.io` → 192.168.6.83:8080 (op25 console; legacy page is the
   data-complete one under single-receiver rx.py)
-- `radio.rg2.io` → 192.168.6.84:8080 (rack tuner UI — DORMANT while paused;
-  consider repointing to radio.srvr:8080, the live V1 tuner UI)
-- `ems.rg2.io` → radio.srvr:8080 (Pi V1 tuner UI — currently the live one)
+- `radio.rg2.io` → **radio.srvr:8080** (live V1 tuner API+UI — the Android
+  app's radio backend; moves to .84:8080 at the radio unpause)
+- `ems.rg2.io` → **192.168.6.83:8081** (scanner-api bridge — the Android
+  app's scanner backend; deployed from the scanner repo). NEVER point it at
+  the Pi's old scheduler — its MOSWIN job USB-resets the dongle out from
+  under sdr-source@rtl-2838.

@@ -235,7 +235,40 @@ EOF
   chown scanner:scanner /opt/scanner-compute/ems.liq
 fi
 
+echo "==> scanner-api env (platform-managed — ALWAYS rewritten)"
+# The V1-contract REST bridge for the Android app / V1 clients (:8081, fed by
+# op25's http terminal). App CODE (scanner_api.py) comes from the scanner
+# repo's deploy.sh (two-cadence) — this lays down only the env + unit.
+cat > /etc/scanner-compute/scanner-api.env <<'EOF'
+# platform-managed — DO NOT hand-edit; terraform re-apply rewrites.
+OP25_TERMINAL_URL=http://127.0.0.1:8080
+API_PORT=8081
+TGID_TAGS=/opt/scanner-compute/moswin-tgid-tags.tsv
+EVENTS_PATH=/var/lib/scanner-compute/call-events.jsonl
+EOF
+
 echo "==> systemd units (laid down + reloaded; enable/start happens at cutover)"
+cat > /etc/systemd/system/scanner-api.service <<'EOF'
+[Unit]
+Description=scanner-api: V1-contract REST bridge (op25 terminal -> :8081)
+After=network-online.target op25-ems.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=scanner
+Group=scanner
+WorkingDirectory=/var/lib/scanner-compute
+EnvironmentFile=/etc/scanner-compute/scanner-api.env
+ExecStart=/usr/bin/python3 /opt/scanner-compute/scanner_api.py
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 cat > /etc/systemd/system/op25-ems.service <<'EOF'
 [Unit]
 Description=op25 P25 trunk receiver (Cape County MOSWIN, remote source)

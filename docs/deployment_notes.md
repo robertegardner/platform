@@ -140,6 +140,35 @@ failed target block `-target` re-provisions of the others.
 4. `radio-compute` — mux/stereo/AM/SatDump against remote sources, per
    `MULTISTATION_STEREO_BUILD.md`.
 
+## Android app integration (2026-06-10/11): scanner-api bridge LIVE on .83
+
+The Android app (`~/radio-android`, also Wear OS) consumes the V1 contracts:
+radio = the sdr-tuner Flask `/api/*` (now_playing/stations/status/tune) at
+`radio.rg2.io`; scanner = the V1 scheduler `/api/*` at `ems.rg2.io`; streams
+from `icecast.rg2.io`. Plan of record: `~/.claude/plans/snug-swimming-dusk.md`.
+
+- **Radio side needs no code** — the same `app.py` serves the contract from
+  the Pi (V1-hybrid, now) or .84 (after unpause). NPM `radio.rg2.io` →
+  radio.srvr:8080 until the unpause, then .84:8080.
+- **Scanner side:** new `scanner-api` bridge on .83:8081 (the **scanner
+  repo**'s `scanner_api.py`, ~290 lines stdlib python; deployed by its
+  `deploy.sh` via the thebeast jump). It is a uuid client of op25's http
+  terminal (1s poll; do NOT parse the stderr log) and serves the exact V1
+  JSON: live `active: <talkgroup tag>` status, call EVENTS (all file fields
+  null — the app renders rows, playback no-ops), `source/moswin` = no-op
+  success, monitor/squelch = graceful errors until the Airspy R2. Unit + env
+  are platform-provisioned (`scanner-api.service`,
+  `/etc/scanner-compute/scanner-api.env`); events persist in
+  `/var/lib/scanner-compute/call-events.jsonl` (deque 500, compacted at 1MB).
+- **Verified:** all 7 endpoints contract-exact by curl; live talkgroup flip +
+  event accumulation observed; op25 web console unaffected (multi-client).
+- **NPM (user):** `ems.rg2.io` → 192.168.6.83:8081. **Never** to the Pi's
+  old scheduler (its MOSWIN path runs `reset_dongle()` → yanks the RTL from
+  the source server → wedges rack op25).
+- **Backlog:** edge-recording in the bridge for tappable calls; aviation
+  monitor/squelch with the R2; NPM basic auth on control POSTs once the app
+  has a settings screen (it already sends an optional Authorization header).
+
 ## RDS verdict + radio GUI move (2026-06-10, late): UI LIVE on the rack
 
 **RDS "issue" closed — no defect.** A/B proved it: the rack-built chain
