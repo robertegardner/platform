@@ -195,16 +195,27 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   op25 emits UDP PCM only during calls; bare ffmpeg stalls and drops the
   mount); needs `python3-setuptools` on noble.
 
-## Bring-up order
+## Bring-up order (state at end of 2026-06-10)
 
 1. ✅ `pi-acquisition` — dx-R2 proven (8 Msps CS16, Gate 0B GO). Remaining
    devices join by flipping `present: true` in the registry + re-apply.
-2. ✅ `distribution` — rack Icecast live + verified. ⏳ NPMplus repoint of
-   `icecast.rg2.io` deferred to after the compute cutovers (it cuts ALL mounts
-   at once — sources must already publish rack-side).
-3. `scanner-compute` — repoint op25 to `driver=remote`; confirm P25 lock and that
-   the Pi throttle is gone with op25 rack-side. Cut `ems*`/`monitor` mounts to
-   the rack here.
-4. `radio-compute` — mux/stereo/AM/SatDump against remote sources, per the radio
-   repo's `MULTISTATION_STEREO_BUILD.md`. Cut `/fm.mp3` here; then the NPMplus
-   repoint, last.
+2. ✅ `distribution` — rack Icecast live; **NPM `icecast.rg2.io` → .82 (done,
+   user)**. Both mounts rack-served.
+3. ✅ `scanner-compute` — op25 LIVE on the interim rtl-2838; `/ems.mp3`
+   rack-sourced. Remaining: scanner v2 app work on Airspy R2 arrival.
+4. ⏸️ `radio-compute` — **PAUSED, rolled back to V1-hybrid** (attic uplink
+   can't carry IQ microbursts — see Current state). Everything stays
+   provisioned on .84. **Unpause = dedicated attic ethernet run**, then:
+   stop Pi `sdr-fm@active` (+disable), enable `sdr-source@dx-r2`, enable
+   `.84` units (`sdr-fm@active`, `sdr-tuner`, `sdr-captions`,
+   `fm-watch.timer`), verify; add `tc fq maxrate` pacing on the Pi as
+   belt-and-braces. Then the stereo mux (radio repo v2) targets .84.
+
+## NPM proxy map (user-managed, as of 2026-06-10)
+
+- `icecast.rg2.io` → 192.168.6.82:8000 (rack Icecast — all public audio)
+- `scanner.rg2.io` → 192.168.6.83:8080 (op25 console; legacy page is the
+  data-complete one under single-receiver rx.py)
+- `radio.rg2.io` → 192.168.6.84:8080 (rack tuner UI — DORMANT while paused;
+  consider repointing to radio.srvr:8080, the live V1 tuner UI)
+- `ems.rg2.io` → radio.srvr:8080 (Pi V1 tuner UI — currently the live one)

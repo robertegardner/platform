@@ -4,6 +4,20 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-10 — DAY SUMMARY (for the next session)
+
+One very long day: compute tier built and both domains cut over → GUIs moved
+→ a cascade of real faults found and fixed (remote-exec masking, grep -q
+SIGPIPE, TUNER gain, liquidsoap mksafe, op25 http sys.exit, -U port bind,
+wlan0 ARP flux, ffmpeg CLOSE-WAIT zombies, watchdog curl-28) → final boss:
+the attic camera flex's shared 1G uplink tail-drops SoapyRemote's line-rate
+IQ microbursts → **V2 radio PAUSED, V1-hybrid restored** (Pi DSP →
+rack Icecast; verified). Scanner remains V2 and healthy. END STATE + NPM map
+in CLAUDE.md; full evidence chains in deployment_notes.md. Unpause trigger:
+the dedicated attic ethernet run. Commits this day: ece97b2…740c818
+(platform), a70253d (radio repo, branch fix-fm-device-loss-selfheal —
+stream.sh ICECAST_HOST, needs merge).
+
 ## 2026-06-10 (late night) — V2 radio PAUSED: V1 hybrid restored
 
 **State: FM DSP back on the Pi, publishing to the rack Icecast (0.25 Mbps
