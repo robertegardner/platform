@@ -1,12 +1,26 @@
-d
+# platform
 
 The acquisition + distribution tier of the SDR homelab. The Pi acquires raw
 samples and serves them on the network; the rack does all DSP and serves all
 streams. Authoritative design lives in `docs/` — read
-`docs/PLATFORM_V2_ARCHITECTURE.md` and `docs/deployment-notes.md` before changing
-anything. Compute lives in the sibling repos `radio` (v2) and `scanner` (v2);
-this repo owns the device registry, the source/mount contracts, and the Terraform
-that stands the whole thing up.
+`docs/PLATFORM_V2_ARCHITECTURE.md` and `docs/deployment_notes.md` before changing
+anything (`docs/session_notes.md` is the quick "where were we" log). Compute
+lives in the sibling repos `radio` (v2) and `scanner` (v2); this repo owns the
+device registry, the source/mount contracts, and the Terraform that stands the
+whole thing up.
+
+## Current state (2026-06-10)
+
+- **Phase 0 GO:** dx-R2 → SoapyRemote → rack proven at 8 Msps CS16 (120 s,
+  0 drops). Only `dx-r2` is `present: true` in the device registry.
+- **Distribution LIVE, no cutover:** rack Icecast on LXC **900**
+  (192.168.6.82), verified end-to-end. `icecast.rg2.io` still proxies to the
+  **Pi's** Icecast — all five V1 mounts (`/fm.mp3`, `/ems*.mp3`) still source
+  Pi-side. Cutover is per-domain at each compute phase (runbook in
+  `deployment_notes.md`).
+- **Waiting on hardware:** scanner-compute (.83/vmid 901) and radio-compute
+  (.84/902) need the Airspy R2 / HF+ / RTL v4. Platform claims IPs
+  192.168.6.82+ and vmids 900+.
 
 ## Hosts & roles
 
@@ -20,6 +34,14 @@ that stands the whole thing up.
   `rgardner`. The live radio host. Treat as production.
 - **LXCs (Server VLAN):** `radio-compute`, `scanner-compute`, `distribution`.
 
+Name-resolution quirks (codeserver): use **`radio.srvr` = 192.168.6.18** (bare
+`radio`/`pi-attic` don't resolve); **thebeast only by IP** (192.168.6.163).
+**`wol.srvr` (192.168.6.24) is a DIFFERENT, unrelated Pi 4** — an ARP/OUI sweep
+finds it first; never provision it. NPMplus = 192.168.6.49 (manual LXC, not
+Terraform-managed). codeserver has no `rsync` — ship the tree to thebeast with
+tar-over-ssh (`tar czf - ... | ssh deploy@192.168.6.163 'tar xzf - -C
+/home/deploy/platform'`).
+
 All hosts are on the **Server VLAN → `vlan_id = 0`** (native untagged). The Pi
 and LXCs are co-VLAN, so there's no routing between acquisition and compute.
 
@@ -29,7 +51,12 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   radio-compute,scanner-compute,distribution}`
 - `terraform/modules/*/provision-*.sh.tpl` — bash provisioning rendered by
   `templatefile()`, run via `remote-exec` over SSH from thebeast
-- `docs/` — `PLATFORM_V2_ARCHITECTURE.md`, `deployment-notes.md`, the registries
+- `docs/` — `PLATFORM_V2_ARCHITECTURE.md`, `deployment_notes.md`, `session_notes.md`
+- `terraform/registry/` — `devices.json` (device→antenna→filter→domain→endpoint;
+  the provisioner iterates `present: true` only) and `mounts.json` (audio
+  namespace + domain ownership)
+- `tools/capture-iq.py` — remote-IQ capture/measure helper (the transport-proof
+  harness)
 - container resource + Proxmox provider: copy the pattern from homelab-monitor's
   `module.monitoring` — do not re-derive the provider/token wiring
 
@@ -38,6 +65,13 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
 - `terraform` runs on thebeast as `deploy` (reuse the homelab deploy key). Its
   key must be authorized on the Pi (`rgardner`, passwordless sudo for installs)
   and in each LXC.
+- **Key pairing:** `ssh_private_key_path` must pair with `ssh_public_key`
+  (`~/.ssh/id_rsa_homelab`) — LXCs only authorize the injected key; the Pi
+  happens to accept `id_ed25519` too, the containers do not.
+- The deploy API token **lacks `Pool.Allocate`** — no Proxmox pool resources;
+  platform LXCs carry the `platform` tag instead.
+- Any module using bpg resources needs its own `required_providers` block
+  (non-hashicorp provider source isn't inherited by name).
 - Validate with `terraform validate`. **Never `terraform fmt -recursive`** — it
   reformats `.tfvars` and leaks the Proxmox token (homelab-monitor gotcha).
 - Re-provision one target:
@@ -96,7 +130,9 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   — **never `enable --now`** (won't restart a running unit; leaves new config
   unloaded).
 - **Provisioners must be re-run safe.** Write configs only if absent (don't
-  clobber UI/manual state); `icecast.xml` only if absent.
+  clobber UI/manual state); `icecast.xml` is guarded by a `platform-managed`
+  marker comment (the package ships a default file, so existence alone can't
+  gate it).
 - **One client per device source.** The scanner scheduler holds one persistent
   client to the R2 and retunes in place — it does not open/close repeatedly.
 - **Wire format:** CS16 for dx-R2/Airspys, CU8 for the RTL v4; set client-side at
@@ -106,15 +142,35 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
 - **Retired, do not reintroduce:** the wxsat skip-when-listening gate (Meteor is
   on its own RTL v4 — no contention), the scanner's satellite-preemption job
   (Meteor is radio-domain now), and any RF/GPIO antenna switch.
-- **Icecast is rack-side now** (`distribution`); `icecast.rg2.io` repoints there
-  via NPMplus. Audio never traverses the Pi link — only outbound samples do.
+- **Icecast is rack-side** (`distribution`, 192.168.6.82) but **`icecast.rg2.io`
+  still proxies to the Pi** until the per-domain cutover (runbook in
+  `deployment_notes.md`). End-state: audio never traverses the Pi link — only
+  outbound samples do. The rack Icecast reuses the Pi's source password so
+  cutovers change only the host.
+- **SoapyRemote needs ~100 MB socket buffers** or 8 Msps streams stall after
+  ~6 s — its own sysctl drop never applies post-boot. `provision-pi.sh.tpl`
+  persists+applies it; don't remove that block.
+- **Remote clients must pass `remote:driver=...`** (e.g. `remote:driver=sdrplay`
+  from the registry `soapy_args`) — bare `driver=remote` makes the server open
+  its first enumerable device (the busy RTL on the Pi).
+- **Default gain saturates the dx-R2 ADC** at 8 Msps (`mean|IQ|≈0.98`) — compute
+  clients set sane gain at connect (source contract #4).
+- **`sdr-source@*` units stay disabled** on the Pi — the dx-R2 is single-client
+  and the live radio claims it at boot. Start a source server only in an
+  attended window (stop `sdr-fm@active` first; arm a `systemd-run --on-active`
+  dead-man that restores the radio; restore + verify `icecast.rg2.io/fm.mp3`
+  when done).
 
 ## Bring-up order
 
-1. `pi-acquisition` — verify each device streams raw to a client on the Server
-   VLAN (no DSP yet).
-2. `distribution` — Icecast + NPMplus routing; repoint `icecast.rg2.io`.
+1. ✅ `pi-acquisition` — dx-R2 proven (8 Msps CS16, Gate 0B GO). Remaining
+   devices join by flipping `present: true` in the registry + re-apply.
+2. ✅ `distribution` — rack Icecast live + verified. ⏳ NPMplus repoint of
+   `icecast.rg2.io` deferred to after the compute cutovers (it cuts ALL mounts
+   at once — sources must already publish rack-side).
 3. `scanner-compute` — repoint op25 to `driver=remote`; confirm P25 lock and that
-   the Pi throttle is gone with op25 rack-side.
+   the Pi throttle is gone with op25 rack-side. Cut `ems*`/`monitor` mounts to
+   the rack here.
 4. `radio-compute` — mux/stereo/AM/SatDump against remote sources, per the radio
-   repo's `MULTISTATION_STEREO_BUILD.md`.
+   repo's `MULTISTATION_STEREO_BUILD.md`. Cut `/fm.mp3` here; then the NPMplus
+   repoint, last.
