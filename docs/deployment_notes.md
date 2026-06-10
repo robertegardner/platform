@@ -208,8 +208,16 @@ rds_watcher on the rack.
   start op25-ems.
   The console has no audio player by design; listen at
   `https://icecast.rg2.io/ems.mp3`.
-- **Radio stream dies after ~2 min — ROOT CAUSE: ARP flux from the Pi's
-  wlan0 (OPEN — one user command).** Diagnosis chain (2026-06-10 evening,
+- **Radio stream dies after ~2 min — RESOLVED 2026-06-10 evening: ARP flux
+  from the Pi's wlan0.** User ran `nmcli radio wifi off` on the Pi → loss
+  matrix 0% everywhere → **15-min soak PASS (0 stream errors, mount 200
+  throughout)**. Two follow-on hardenings landed during validation:
+  `fm-watch.timer` (per-minute mount watchdog — ffmpeg can zombie in
+  CLOSE-WAIT when icecast drops the source in a restart race; NB its curl
+  check must NOT `|| echo` a fallback, since fetching an endless stream
+  always exits 28 after `-w` printed 200 — the concatenated "200000" made
+  v1 of the watchdog restart-loop a healthy stream), and the earlier unit
+  hardening (SIGINT/settle). Original diagnosis below for the record. Diagnosis chain (2026-06-10 evening,
   after the thebeast sysctl didn't fix it): local dx-R2 delivery clean
   (1.97/2.0 Msps), localhost SoapyRemote clean, remote clients starved
   (0.07–0.9× requested, worsening) with the server sending almost nothing —

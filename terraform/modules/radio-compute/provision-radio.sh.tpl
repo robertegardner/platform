@@ -286,7 +286,56 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
+# Mount watchdog: ffmpeg can zombie in CLOSE-WAIT when icecast drops the
+# source during a restart race (mount 404 while the unit looks active,
+# observed 2026-06-10). Two consecutive missing-mount checks → unit restart.
+cat > /opt/radio-compute/fm-watch.sh <<'EOF'
+#!/usr/bin/env bash
+# platform-managed — do not hand-edit; terraform re-apply rewrites.
+set -u
+STRIKES=/run/fm-watch.strikes
+systemctl is-active --quiet sdr-fm@active || { rm -f "$STRIKES"; exit 0; }
+# NB: no `|| echo` — fetching an endless stream ALWAYS exits 28 (timeout)
+# after -w already printed 200; appending a fallback made "200000" and the
+# watchdog restart-looped a healthy stream (bit us 2026-06-10). curl's -w
+# prints 000 by itself when the connection truly fails.
+code=$(curl -s -m 5 -o /dev/null -w '%%{http_code}' http://${icecast_host}:${icecast_port}/fm.mp3)
+if [ "$code" = "200" ]; then rm -f "$STRIKES"; exit 0; fi
+n=$(($(cat "$STRIKES" 2>/dev/null || echo 0) + 1))
+if [ "$n" -ge 2 ]; then
+  echo "fm-watch: mount missing twice (last code $code) - restarting sdr-fm@active"
+  rm -f "$STRIKES"
+  systemctl restart sdr-fm@active
+else
+  echo "$n" > "$STRIKES"
+fi
+EOF
+chmod +x /opt/radio-compute/fm-watch.sh
+
+cat > /etc/systemd/system/fm-watch.service <<'EOF'
+[Unit]
+Description=FM mount watchdog (restart sdr-fm@active if the mount vanishes)
+
+[Service]
+Type=oneshot
+ExecStart=/opt/radio-compute/fm-watch.sh
+EOF
+
+cat > /etc/systemd/system/fm-watch.timer <<'EOF'
+[Unit]
+Description=Run the FM mount watchdog every minute
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
+systemctl enable fm-watch.timer >/dev/null 2>&1 || true
+systemctl start fm-watch.timer || true
 
 echo "==> provisioning complete (toolchain staged; no units, nothing started)"
 echo "    csdr=$(command -v csdr || echo missing) nrsc5=$(command -v nrsc5 || echo missing) satdump=$(command -v satdump || echo missing)"
