@@ -32,6 +32,10 @@ else
   fi
 fi
 command -v SoapySDRServer >/dev/null 2>&1 || { echo "FATAL: SoapySDRServer still missing"; exit 1; }
+# Absolute path for the unit's ExecStart — apt installs to /usr/bin, the source
+# build to /usr/local/bin; detect whichever is present.
+SERVER_BIN="$(command -v SoapySDRServer)"
+echo "    SoapySDRServer at $${SERVER_BIN}"
 
 echo "==> SDRplay loader path fix"
 # SoapySDRPlay3 lives in /usr/local/lib and needs libsdrplay_api.so.3 (also in
@@ -69,13 +73,16 @@ Wants=network-online.target
 Type=simple
 EnvironmentFile=/etc/sdr-source/%i.env
 Environment=LD_LIBRARY_PATH=/usr/local/lib
-ExecStart=/usr/bin/SoapySDRServer --bind=0.0.0.0:$${SOAPY_PORT}
+ExecStart=__SERVER_BIN__ --bind=0.0.0.0:$${SOAPY_PORT}
 Restart=on-failure
 RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# Substitute the detected server path (use # as delimiter — path has slashes).
+sed -i "s#__SERVER_BIN__#$${SERVER_BIN}#" /etc/systemd/system/sdr-source@.service
 
 systemctl daemon-reload
 

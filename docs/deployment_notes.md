@@ -139,3 +139,68 @@ failed target block `-target` re-provisions of the others.
    confirm P25 lock and that the throttle is gone with op25 rack-side.
 4. `radio-compute` — mux/stereo/AM/SatDump against remote sources, per
    `MULTISTATION_STEREO_BUILD.md`.
+
+## Phase 0B transport proof — RESULT (2026-06-09, attended): NO-GO at 8 Msps
+
+Proved SoapyRemote IQ from the **live dx-R2** (RSPdx-R2, serial 22012952) to a
+rack client (codeserver, 192.168.6.218) over GbE. Source server
+`sdr-source@dx-r2` on `radio.srvr:55001`; client connects with
+`driver=remote,remote=radio.srvr:55001,remote:driver=sdrplay`. Live radio
+(`sdr-fm@active`) stopped for the window and **restored + verified afterward**
+(`/fm.mp3` back on Icecast, `radio.rg2.io`/`icecast.rg2.io/fm.mp3` → 200 audio).
+
+**What works (transport is fundamentally sound):**
+- Remote probe clean: RSPdx-R2 enumerated with antennas A/B/C, gain ranges,
+  rates to 10.66 MSps. Remote freq/rate/antenna control all apply.
+- **2.5 Msps CS16, fc=100.7 MHz, Antenna A, 25 s:** sustained ~2.46 Msps (98% of
+  requested), **no stall**, server sdrplay stream threads healthy throughout.
+- Captured IQ is **real signal**, not noise: FM carrier at 100.7 (KGMO) measured
+  **13.7 dB** above the ±1 MHz noise floor; `mean|IQ| = 0.375`. (Full audio demod
+  skipped — scipy absent on codeserver — spectral proof substituted.)
+
+**What fails (the gate bar is not met):**
+- **8 Msps CS16, fc=98.0 MHz, 90 s requested:** ran ~7.6–7.9 Msps for ~6 s, then
+  the stream **stalled completely** — `readStream` returned `SOAPY_SDR_TIMEOUT`
+  (-1) for the rest of the run, 0 further samples. This is the "latency stall /
+  throughput problem" NO-GO condition. The gate requires a stable multi-minute
+  8 Msps CS16 capture; not achieved.
+
+**Verdict:** **NO-GO at 8 Msps.** Do NOT build distribution/compute on this until
+8 Msps is stable. The transport, device control, and signal integrity are proven
+at 2.5 Msps, so this is a throughput-tuning problem, not a dead end.
+
+**Next (focused, in a fresh attended window):** investigate per the build prompt
+before re-attempting 8 Msps —
+- Receiver socket buffers on the client: raise `net.core.rmem_max`/`rmem_default`
+  (SoapyRemote's stream is UDP datagrams; small kernel UDP buffers drop bursts).
+- SoapyRemote stream args: `remote:mtu=` (default 1500 → try larger / jumbo if
+  the switch path supports it), `remote:window=` (socket window), and try
+  `remote:prot=tcp` vs the default to see which survives 8 Msps.
+- Confirm the dx-R2 sustains 8 Msps **locally** on the Pi (rule out USB
+  contention with the co-resident RTL2838 before blaming the network).
+- Sweep intermediate rates (4 / 5 / 6 Msps) to find where the stall onsets.
+
+**Bug fixed in the proof tooling:** `tools/capture-iq.py` originally OR-counted
+`flags & SOAPY_SDR_OVERFLOW`, misusing the -4 *return code* as a flag bitmask;
+that inflated overflow counts into the 100k+ range and was meaningless. It now
+counts only genuine `ret == SOAPY_SDR_OVERFLOW` (-4) and reports
+`SOAPY_SDR_TIMEOUT` (-1) separately as the stall signal.
+
+### Provisioning gotchas surfaced this phase (Pi / radio.srvr)
+- **`SoapySDRServer` is not in Debian's `soapysdr-module-remote`** — the apt path
+  yielded no server binary, so the provisioner source-builds SoapyRemote to
+  `/usr/local/bin`. The unit's `ExecStart` is patched to the detected path
+  (apt `/usr/bin` vs source `/usr/local/bin`), not hardcoded.
+- **`libsdrplay_api.so.3` is mode 0750 root:radio.** Only root (and the `radio`
+  group) can read it. The source server runs as root, so it loads fine; any
+  ad-hoc `SoapySDRUtil --find` as `rgardner` fails to dlopen the SDRplay module
+  (red herring — not a transport fault). Provisioning adds
+  `/etc/ld.so.conf.d/usrlocal-sdrplay.conf` + `ldconfig` and sets
+  `LD_LIBRARY_PATH=/usr/local/lib` in the unit so the loader finds it.
+- **Client must select the remote device:** bare `driver=remote` makes the server
+  open its *first* enumerable device (here the busy RTL2838 → `usb_claim_interface
+  error -6`). Always pass `remote:driver=sdrplay` (from the registry `soapy_args`).
+- The `sdr-source@` unit is deliberately **not enabled** (no boot start) — it
+  would double-claim the dx-R2 against the boot-time `sdr-fm@active`. Start it by
+  hand only inside an attended window. A `systemd-run --on-active` dead-man timer
+  (stop source + start radio) guards the window against a dropped session.
