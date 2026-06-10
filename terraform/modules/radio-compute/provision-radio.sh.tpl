@@ -222,6 +222,9 @@ cat > /etc/systemd/system/sdr-fm@.service <<'EOF'
 Description=SDR FM stream %i (rack, remote dx-R2)
 After=network-online.target
 Wants=network-online.target
+# Never give up retrying — a transient server-side wedge self-heals on a
+# later open; start-limit death just strands the mount.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -229,6 +232,14 @@ User=radio
 Group=radio
 WorkingDirectory=/opt/sdr-tuner
 EnvironmentFile=/etc/sdr-streams/%i.env
+# UI tunes restart this unit. The remote sdrplay session wedges if rx_fm is
+# killed mid-stream without deactivating its SoapyRemote stream (then every
+# reopen fails / decodes garbage until a server-side bounce). SIGINT lets
+# rx_fm tear down cleanly; the pre-start sleep lets the server finish
+# releasing the device before the reopen.
+KillSignal=SIGINT
+TimeoutStopSec=15
+ExecStartPre=/bin/sleep 2
 ExecStart=/opt/sdr-tuner/stream.sh
 Restart=always
 RestartSec=5

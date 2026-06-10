@@ -182,6 +182,19 @@ rds_watcher on the rack.
   it when the R2 lands.
 - **NPM suggestions (user-managed):** `radio.rg2.io` → 192.168.6.84:8080;
   `scanner.rg2.io` (or repoint `ems.rg2.io`) → 192.168.6.83:8080.
+- **Tune reliability fix (2026-06-10, post-GUI):** UI tunes restart
+  `sdr-fm@active`; killing rx_fm mid-stream without deactivating its
+  SoapyRemote stream wedged the server-side sdrplay session — most tunes then
+  failed ("source not found" = dead mount) and a half-wedged open decoded
+  garbage. The unit now uses `KillSignal=SIGINT` (clean stream teardown),
+  `ExecStartPre=sleep 2` (server release settle), and
+  `StartLimitIntervalSec=0` (never strand the mount). Verified: 3/3
+  consecutive API tunes recovered the mount in <18 s with clean audio.
+- **op25 web console:** the NEW UI (index.html) is built for `multi_rx.py`
+  and shows "waiting for data" under our interim single-receiver `rx.py` —
+  use the **legacy page** (`/legacy-index.html`) until scanner v2 moves to
+  multi_rx. The console has no audio player by design; listen at
+  `https://icecast.rg2.io/ems.mp3`.
 - **Ops gotcha — wedged dx-R2 source:** if clients flap with "Failed to open
   sdr device" after device juggling, do the ordered bounce: stop client
   (.84 `sdr-fm@active`) → on the Pi `systemctl stop sdr-source@dx-r2 &&
