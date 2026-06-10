@@ -208,8 +208,24 @@ rds_watcher on the rack.
   start op25-ems.
   The console has no audio player by design; listen at
   `https://icecast.rg2.io/ems.mp3`.
-- **FM audio chop / stutter (OPEN — physical-layer suspect, 2026-06-10
-  night):** AFTER the wlan0/ARP fix, an intermittent residual remains:
+- **FM audio chop — ROOT CAUSE LOCATED via UniFi controller (2026-06-10
+  late night): the attic flex uplink.** The Pi shares the "Attic Camera
+  Flex 2.5G 8 PoE" with 8 cameras (~124 Mbps continuous) and an HDHomeRun
+  (bursty UDP TV). The flex's uplink port 9 is **10GE media linked at only
+  1000 Mbps** (SFP+ port 10 unused/down) — everything funnels through a
+  degraded 1G uplink. SoapyRemote sends IQ as line-rate 1G microbursts;
+  bursts + camera/TV aggregate momentarily exceed 1G egress → small-buffer
+  tail drops → the loss-intolerant IQ stream eats it (paced TCP camera
+  streams shrug; sparse ICMP never queues; V1's 0.5 Mbps audio never
+  noticed). A 10G port negotiating down to 1G also implies a marginal
+  cable run — consistent with heat-correlated waves. Options:
+  (a) pace the Pi's egress (`tc qdisc replace dev eth0 root fq maxrate
+  300mbit`, reversible — software mitigation, shrinks burst queue spikes);
+  (b) fix the uplink to 2.5/10G (cable/SFP+) — capacity headroom;
+  (c) move the Pi to the Rack Wall flex / its own run — full isolation
+  from camera+TV traffic (cleanest for V2's acquisition role).
+- **FM audio chop / stutter (superseded by the above — software-layer
+  exoneration record, 2026-06-10 night):** AFTER the wlan0/ARP fix, an intermittent residual remains:
   bursty-UDP loss in WAVES on the Pi→rack path (measured 9% to 88% of
   stream datagrams vanishing in transit while ICMP stays 0% and the Pi's
   TX counters show full-rate sends; client socket stack exonerated —
