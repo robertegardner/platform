@@ -140,7 +140,42 @@ failed target block `-target` re-provisions of the others.
 4. `radio-compute` — mux/stereo/AM/SatDump against remote sources, per
    `MULTISTATION_STEREO_BUILD.md`.
 
-## Phase 0B transport proof — RESULT (2026-06-09, attended): NO-GO at 8 Msps
+## Phase 0B transport proof — FINAL RESULT (2026-06-10, tuning window): **GO**
+
+The 8 Msps stall below was **root-caused and fixed in a second attended window**:
+kernel socket buffers. SoapyRemote requests ~100 MB socket buffers and installs
+`/usr/local/lib/sysctl.d/10-SoapySDRServer.conf` saying so — but a sysctl drop
+landing post-boot is never applied, so the Pi sat at the 4 MB default
+(`net.core.wmem_max`), the server's UDP send path starved, and the sdrplay
+stream died after ~6 s at 8 Msps.
+
+**Tuning-window evidence (radio stopped, dead-man armed, restored + verified):**
+- **Test A — local USB sanity:** `SoapySDRUtil --rate=8e6` on the Pi sustained
+  ~7.9 Msps clean for 30 s. USB was never the problem (co-resident RTL2838 is a
+  non-factor).
+- **Fix:** `net.core.{rmem,wmem}_max=104857600` applied on the Pi and codeserver,
+  persisted via `/etc/sysctl.d/`; source server restarted to pick them up. Now
+  encoded in `provision-pi.sh.tpl` (writes `/etc/sysctl.d/10-sdr-source.conf` +
+  `sysctl -p`).
+- **Test B — the gate test: 120 s remote 8 Msps CS16** (fc=98.0, Antenna A, UDP
+  default transport): sustained ~7.9 Msps instantaneous (7.82 Msps mean incl.
+  slow-start, ~250 Mbps on the wire), **0 overflows, 0 timeouts, 0 errors**. The
+  previously-stalling configuration now runs clean with NO SoapyRemote stream-arg
+  tuning needed (default mtu/window/prot all fine).
+- **Test C — signal at the V2 operating point:** 8 Msps capture at fc=98.0 shows
+  station structure across the span (98.5 MHz at +8.4 dB). Caveat for
+  radio-compute: the **default gain saturates the ADC** (`mean|IQ|≈0.98`) — the
+  compute client must set sane gain at connect (per source contract #4), e.g. the
+  2.5 Msps run at gain-default measured `mean|IQ|=0.375` with a 13.7 dB carrier.
+
+**Gate 0B: GO.** Remote probe clean; stable multi-minute 8 Msps CS16 with zero
+drops; remote freq/rate/antenna control proven; real signal confirmed. Safe to
+proceed to `distribution` → `scanner-compute` → `radio-compute` when hardware
+lands.
+
+---
+
+### Initial attempt (2026-06-09, superseded): NO-GO at 8 Msps
 
 Proved SoapyRemote IQ from the **live dx-R2** (RSPdx-R2, serial 22012952) to a
 rack client (codeserver, 192.168.6.218) over GbE. Source server

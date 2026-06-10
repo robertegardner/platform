@@ -37,6 +37,18 @@ command -v SoapySDRServer >/dev/null 2>&1 || { echo "FATAL: SoapySDRServer still
 SERVER_BIN="$(command -v SoapySDRServer)"
 echo "    SoapySDRServer at $${SERVER_BIN}"
 
+echo "==> socket buffers for SoapyRemote streaming"
+# SoapyRemote installs a sysctl drop recommending 100 MB socket buffers, but a
+# file landing post-boot is never applied — the Pi sat at the 4 MB default and
+# 8 Msps CS16 streams stalled after ~6 s (proven in the Phase 0B tuning window;
+# raising these fixed it). Persist to /etc/sysctl.d and apply now.
+cat > /etc/sysctl.d/10-sdr-source.conf <<'EOF'
+# SoapyRemote source servers: large socket buffers for high-rate IQ streaming.
+net.core.rmem_max=104857600
+net.core.wmem_max=104857600
+EOF
+/sbin/sysctl -p /etc/sysctl.d/10-sdr-source.conf
+
 echo "==> SDRplay loader path fix"
 # SoapySDRPlay3 lives in /usr/local/lib and needs libsdrplay_api.so.3 (also in
 # /usr/local/lib), which is not on this host's default loader path. Without this,
