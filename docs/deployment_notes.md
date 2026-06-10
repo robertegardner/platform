@@ -208,6 +208,23 @@ rds_watcher on the rack.
   start op25-ems.
   The console has no audio player by design; listen at
   `https://icecast.rg2.io/ems.mp3`.
+- **FM audio chop / stutter (OPEN — physical-layer suspect, 2026-06-10
+  night):** AFTER the wlan0/ARP fix, an intermittent residual remains:
+  bursty-UDP loss in WAVES on the Pi→rack path (measured 9% to 88% of
+  stream datagrams vanishing in transit while ICMP stays 0% and the Pi's
+  TX counters show full-rate sends; client socket stack exonerated —
+  UdpRcvbufErrors 0). Every software layer was isolated and cleared:
+  device clean locally (1.97/2.0 Msps), SoapyRemote clean over localhost,
+  no ADC overload events, no CPU pressure (PSI ~1%), no clipping at the
+  audio layer. TCP transport and CS8 wire format don't beat the waves
+  (tested mid-wave; comparisons across time invalid). Suspects, in order:
+  the attic switch / the Pi's cable/port (timing correlated with peak attic
+  heat: clean all morning, gross at 16-18h, variable at night), or the
+  switch the Pi uplinks through. Needs a physical check / switch port
+  counters — not reachable from here. The chain is left on the V1-proven
+  CS16 config with watchdogs; audio is clean between waves and choppy
+  during them. The scanner (38 Mbps CU8 + P25's burst tolerance + op25's
+  resync) rides the same waves mostly unnoticed.
 - **Radio stream dies after ~2 min — RESOLVED 2026-06-10 evening: ARP flux
   from the Pi's wlan0.** User ran `nmcli radio wifi off` on the Pi → loss
   matrix 0% everywhere → **15-min soak PASS (0 stream errors, mount 200
