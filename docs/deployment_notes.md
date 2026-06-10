@@ -208,13 +208,25 @@ rds_watcher on the rack.
   start op25-ems.
   The console has no audio player by design; listen at
   `https://icecast.rg2.io/ems.mp3`.
-- **Radio stream dies after ~2 min (OPEN — needs thebeast root):**
-  `readStream read failed: -1` mid-run. The FM wire is 2 Msps CS16 (~64 Mbps
-  — rx_fm decimates client-side, NOT server-side) and thebeast's host kernel
-  has the 4 MB default socket buffers (the exact Phase 0B failure value; LXCs
-  can't raise them). One-time root step on thebeast:
-  `sysctl -w net.core.rmem_max=104857600 net.core.wmem_max=104857600` +
-  persist in `/etc/sysctl.d/10-sdr-platform.conf`.
+- **Radio stream dies after ~2 min — ROOT CAUSE: ARP flux from the Pi's
+  wlan0 (OPEN — one user command).** Diagnosis chain (2026-06-10 evening,
+  after the thebeast sysctl didn't fix it): local dx-R2 delivery clean
+  (1.97/2.0 Msps), localhost SoapyRemote clean, remote clients starved
+  (0.07–0.9× requested, worsening) with the server sending almost nothing —
+  SoapyRemote's client→server flow-control packets were being lost. Ping
+  matrix from the Pi showed intermittent loss WAVES (72.5% to the gateway,
+  7.5% to thebeast/VMs, 0% minutes later, per-destination variation).
+  Cause: **wlan0 is up with 192.168.6.19 on the same subnet as eth0 (.18)**
+  — the Pi answers ARP for .18 on both interfaces; when a peer's ARP cache
+  flips to the wlan0 MAC, traffic toward the Pi rides the attic WiFi. That's
+  also why the rtl-2838→.83 flow survived (that host's ARP entry stayed
+  correct) and why relayed listening (rack→Pi) stayed clean.
+  **Fix (user, on the Pi): `sudo nmcli radio wifi off`** (wired production
+  node; same-subnet dual-homing is inherently broken). Then re-soak FM.
+  The thebeast sysctl (rmem/wmem 100 MB, applied by user) stays — it's a
+  real prerequisite for the high-rate phases regardless.
+  FM wire-rate correction for the record: rx_fm runs the device at 2 Msps
+  and decimates CLIENT-side → ~64 Mbps on the wire, not 1 MB/s.
 - **Ops gotcha — wedged dx-R2 source:** if clients flap with "Failed to open
   sdr device" after device juggling, do the ordered bounce: stop client
   (.84 `sdr-fm@active`) → on the Pi `systemctl stop sdr-source@dx-r2 &&
