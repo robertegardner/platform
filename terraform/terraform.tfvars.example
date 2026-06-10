@@ -9,9 +9,11 @@ pm_node             = "thebeast"
 pm_tls_insecure     = true
 
 # --- Pi acquisition node ---
-pi_host              = "radio.srvr" # set to 192.168.6.18 if thebeast can't resolve it
-pi_ssh_user          = "rgardner"
-ssh_private_key_path = "~/.ssh/id_ed25519"
+pi_host     = "radio.srvr" # set to 192.168.6.18 if thebeast can't resolve it
+pi_ssh_user = "rgardner"
+# MUST pair with ssh_public_key below — LXCs only authorize the injected key
+# (the Pi accepts either deploy key, the containers do not).
+ssh_private_key_path = "~/.ssh/id_rsa_homelab"
 
 # --- LXC base (defaults usually fine; vmid/IP block: platform owns 900+/.82+) ---
 ssh_public_key = "ssh-ed25519 AAAA...REPLACE deploy@thebeast"

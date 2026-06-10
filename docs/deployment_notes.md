@@ -140,6 +140,49 @@ failed target block `-target` re-provisions of the others.
 4. `radio-compute` — mux/stereo/AM/SatDump against remote sources, per
    `MULTISTATION_STEREO_BUILD.md`.
 
+## Distribution tier bring-up (2026-06-10): rack Icecast LIVE, no cutover
+
+`module.distribution` applied: LXC **900** (`distribution`, 192.168.6.82, 1
+vCPU/1 GB/8 GB, unprivileged, vlan_id=0, ubuntu-24.04) running Icecast 2.4.4
+with the platform-managed `icecast.xml` (hostname `icecast.rg2.io`, port 8000,
+same source password as the Pi's Icecast — by design, so source cutovers change
+only the host). Mount namespace defined in `terraform/registry/mounts.json`.
+
+**Verified end-to-end:** test source (ffmpeg, from the Pi — the exact future
+cutover path) published `/test.mp3` at 128k; mount appeared in status-json;
+listener pulled 256 KB of valid MP3; mount cleaned up on source disconnect.
+Re-provision idempotent (`taint` + `apply`: icecast.xml mtime byte-identical —
+marker guard works; service stays active). Production untouched throughout: all
+five Pi mounts live, `icecast.rg2.io/fm.mp3` → 200 via the Pi.
+
+**Deliberately NOT done (stand-up only):** NPMplus still proxies
+`icecast.rg2.io` → Pi:8000; no Pi source client was repointed; the scanner was
+not touched.
+
+Gotchas surfaced:
+- The deploy API token lacks `Pool.Allocate` → no Proxmox pool resource;
+  platform LXCs are identified by the `platform` tag instead.
+- The container root key comes from `ssh_public_key` (homelab-monitor's RSA
+  key, `rgardner@penguin`) → `ssh_private_key_path` in tfvars must be
+  `~/.ssh/id_rsa_homelab`, not `id_ed25519` (the Pi accepts both, the LXC only
+  the injected one).
+- Modules using bpg resources need their own `required_providers` block
+  (non-hashicorp source isn't inherited by name).
+
+### Future cutover runbook (NOT executed — per-domain, at each compute phase)
+
+1. **scanner-compute phase:** point SDRTrunk's `icecastHTTPConfiguration`
+   (playlist XML via `gen_aliases.py`) and scanner-transcribe's publish/read
+   URLs from `localhost:8000` → `192.168.6.82:8000` (same credentials). Verify
+   `/ems*.mp3` + `/monitor.mp3` sourced on the rack.
+2. **radio-compute phase:** same for the FM publisher (`stream.sh` /
+   `/etc/sdr-streams/*.env`) → `/fm.mp3` on the rack.
+3. **When all mounts are rack-side:** in NPMplus (192.168.6.49, admin :81)
+   change the `icecast.rg2.io` proxy host target Pi:8000 → 192.168.6.82:8000.
+   Verify every mount through the public name, then disable the Pi's `icecast2`
+   (`systemctl disable --now icecast2` on the Pi — only after listeners confirm).
+4. Rollback at any step = revert the one changed publish URL / proxy target.
+
 ## Phase 0B transport proof — FINAL RESULT (2026-06-10, tuning window): **GO**
 
 The 8 Msps stall below was **root-caused and fixed in a second attended window**:

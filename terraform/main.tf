@@ -20,11 +20,10 @@ module "pi_acquisition" {
   devices              = local.present_devices
 }
 
-# Proxmox resource pool for the platform LXCs (parallel to homelab-monitor's).
-resource "proxmox_virtual_environment_pool" "platform" {
-  pool_id = var.pool_name
-  comment = "SDR platform V2 — distribution + compute LXCs (Terraform-managed)"
-}
+# NOTE: no proxmox_virtual_environment_pool here — the deploy API token lacks
+# Pool.Allocate (verified: HTTP 403 on create). Platform LXCs are identified by
+# their "platform" tag instead. If a pool is ever wanted, create it once as
+# root on thebeast and pass pool_name through to the modules.
 
 # Tier 2 — Distribution (rack Icecast). No depends_on pi-acquisition by design:
 # a down source is a runtime concern; hard ordering would block -target re-provisions.
@@ -40,7 +39,6 @@ module "distribution" {
   storage              = var.lxc_storage
   template             = var.lxc_template
   bridge               = var.pve_bridge
-  pool_name            = proxmox_virtual_environment_pool.platform.pool_id
   ssh_public_key       = var.ssh_public_key
   ssh_private_key_path = var.ssh_private_key_path
 

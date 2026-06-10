@@ -45,8 +45,9 @@ variable "bridge" {
 }
 
 variable "pool_name" {
-  description = "Proxmox resource pool"
+  description = "Proxmox resource pool (null = none; deploy token lacks Pool.Allocate)"
   type        = string
+  default     = null
 }
 
 variable "ssh_public_key" {
