@@ -20,12 +20,38 @@ module "pi_acquisition" {
   devices              = local.present_devices
 }
 
-# Tiers 2/3 — stubs for now (no resources). They exist so the root wires cleanly
-# and later phases drop resources in without restructuring.
-module "distribution" {
-  source = "./modules/distribution"
+# Proxmox resource pool for the platform LXCs (parallel to homelab-monitor's).
+resource "proxmox_virtual_environment_pool" "platform" {
+  pool_id = var.pool_name
+  comment = "SDR platform V2 — distribution + compute LXCs (Terraform-managed)"
 }
 
+# Tier 2 — Distribution (rack Icecast). No depends_on pi-acquisition by design:
+# a down source is a runtime concern; hard ordering would block -target re-provisions.
+module "distribution" {
+  source = "./modules/distribution"
+
+  vmid                 = var.vmid_base + 0
+  ip                   = var.distribution_ip
+  prefix               = var.prefix
+  gw                   = var.gw_server
+  vlan_id              = var.vlan_server
+  node                 = var.pm_node
+  storage              = var.lxc_storage
+  template             = var.lxc_template
+  bridge               = var.pve_bridge
+  pool_name            = proxmox_virtual_environment_pool.platform.pool_id
+  ssh_public_key       = var.ssh_public_key
+  ssh_private_key_path = var.ssh_private_key_path
+
+  icecast_hostname        = var.icecast_hostname
+  icecast_source_password = var.icecast_source_password
+  icecast_admin_password  = var.icecast_admin_password
+}
+
+# Tier 3 — stubs for now (no resources). They exist so the root wires cleanly
+# and later phases drop resources in without restructuring.
+# Reserved: scanner-compute = vmid_base+1 / .83, radio-compute = vmid_base+2 / .84.
 module "scanner_compute" {
   source = "./modules/scanner-compute"
 }

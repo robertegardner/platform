@@ -12,3 +12,15 @@ pm_tls_insecure     = true
 pi_host              = "radio.srvr" # set to 192.168.6.18 if thebeast can't resolve it
 pi_ssh_user          = "rgardner"
 ssh_private_key_path = "~/.ssh/id_ed25519"
+
+# --- LXC base (defaults usually fine; vmid/IP block: platform owns 900+/.82+) ---
+ssh_public_key = "ssh-ed25519 AAAA...REPLACE deploy@thebeast"
+# vmid_base       = 900
+# distribution_ip = "192.168.6.82"
+# lxc_template    = "local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst"
+
+# --- Distribution tier (Icecast) ---
+# Source password REUSES the Pi Icecast's existing one (so source clients cut
+# over by changing only the host). Both live here on thebeast only.
+icecast_source_password = "REPLACE-SAME-AS-PI-ICECAST"
+icecast_admin_password  = "REPLACE-WITH-GENERATED"

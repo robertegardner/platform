@@ -1,0 +1,41 @@
+{
+  "_comment": "Mount registry — the audio namespace and its domain ownership, per docs/PLATFORM_V2_ARCHITECTURE.md (Tier 2). All audio publishes to the rack Icecast (distribution LXC) as a source client named here; non-audio artifacts are served by the owning compute UI, never as mounts. NPMplus routing and the compute UIs agree on this table. Nothing parses this yet — humans and later phases do.",
+  "icecast": {
+    "hostname": "icecast.rg2.io",
+    "port": 8000,
+    "note": "icecast.rg2.io still proxies to the Pi (V1). It repoints to the distribution LXC at cutover — see the runbook in docs/deployment_notes.md."
+  },
+  "mounts": {
+    "/fm.mp3": {
+      "domain": "radio",
+      "source": "primary FM channel (back-compat URL preserved from V1)",
+      "bitrate_kbps": 256
+    },
+    "/fm-<freq>.mp3": {
+      "domain": "radio",
+      "source": "additional FM channels from the multistation mux (<=4 total)",
+      "pattern": true
+    },
+    "/am-<freq>.mp3": {
+      "domain": "radio",
+      "source": "AM broadcast, e.g. /am-1120.mp3 KMOX",
+      "pattern": true
+    },
+    "/scanner-p25.mp3": {
+      "domain": "scanner",
+      "source": "active P25 talkgroup audio"
+    },
+    "/scanner-atc.mp3": {
+      "domain": "scanner",
+      "source": "ATC audio (when the R2 is on ATC)"
+    }
+  },
+  "legacy_v1_mounts": {
+    "_comment": "Currently live on the Pi's local Icecast, published to localhost:8000 by V1 services. They migrate to the rack at their owning compute phase; do not reuse these names for V2 mounts until then.",
+    "/ems.mp3": { "domain": "scanner", "source": "SDRTrunk MOSWIN All (32k)", "migrates_at": "scanner-compute" },
+    "/ems-fire.mp3": { "domain": "scanner", "source": "SDRTrunk MOSWIN Fire", "migrates_at": "scanner-compute" },
+    "/ems-police.mp3": { "domain": "scanner", "source": "SDRTrunk MOSWIN Police", "migrates_at": "scanner-compute" },
+    "/ems-interop.mp3": { "domain": "scanner", "source": "SDRTrunk MOSWIN Interop", "migrates_at": "scanner-compute" },
+    "/monitor.mp3": { "domain": "scanner", "source": "scanner-transcribe monitor loop", "migrates_at": "scanner-compute" }
+  }
+}
