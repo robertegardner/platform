@@ -36,6 +36,12 @@ Scanner stays V2. User decision after the transit-loss root cause.**
 - **Unpause trigger: dedicated attic run to the aggregation switch** (user
   plans a new pull). Then re-cutover = the documented switch steps; also
   consider `tc fq maxrate` pacing on the Pi as belt-and-braces.
+- Post-restore addendum: the V1 publish chain stranded once on a transient
+  path blip (ffmpeg output error wedges the pipeline half-alive — no
+  pipefail in stream.sh's inner shell). Installed `pi-fm-watch.timer` on the
+  Pi (same 2-strike mount watchdog as .84's; script at
+  /usr/local/sbin/pi-fm-watch.sh, marked platform-cutover). Belongs in the
+  radio repo long-term, alongside merging branch fix-fm-device-loss-selfheal.
 
 ## 2026-06-10 (night) — RDS verdict + radio GUI on the rack
 
