@@ -56,6 +56,29 @@ echo "==> SDRplay loader path fix"
 echo "/usr/local/lib" > /etc/ld.so.conf.d/usrlocal-sdrplay.conf
 ldconfig
 
+echo "==> SoapyRTLSDR module (build-if-absent)"
+# Needed to serve the RTL2838 (interim scanner source) over SoapyRemote. The
+# Pi's SoapySDR is built from source in /usr/local, so the apt module may not
+# match its ABI/module path — build SoapyRTLSDR from source against it if the
+# factory isn't visible. librtlsdr itself comes from apt.
+# grep without -q: under pipefail, -q's early exit can SIGPIPE the producer
+# and fail the pipeline on a genuine match.
+if LD_LIBRARY_PATH=/usr/local/lib SoapySDRUtil --info 2>/dev/null | grep -i rtlsdr >/dev/null; then
+  echo "    rtlsdr factory already visible - keeping it"
+else
+  apt-get update -qq || true
+  apt-get install -y -qq librtlsdr-dev rtl-sdr git cmake g++ make pkg-config
+  tmp="$(mktemp -d)"
+  git clone --depth 1 https://github.com/pothosware/SoapyRTLSDR.git "$tmp/SoapyRTLSDR"
+  cmake -S "$tmp/SoapyRTLSDR" -B "$tmp/SoapyRTLSDR/build" -DCMAKE_BUILD_TYPE=Release
+  cmake --build "$tmp/SoapyRTLSDR/build" -j"$(nproc)"
+  cmake --install "$tmp/SoapyRTLSDR/build"
+  rm -rf "$tmp"
+  ldconfig
+  LD_LIBRARY_PATH=/usr/local/lib SoapySDRUtil --info 2>/dev/null | grep -i rtlsdr >/dev/null \
+    || { echo "FATAL: rtlsdr factory still not visible after build"; exit 1; }
+fi
+
 echo "==> Per-device source environment files"
 mkdir -p /etc/sdr-source
 %{ for id, dev in devices ~}
@@ -101,6 +124,10 @@ systemctl daemon-reload
 # Intentionally NOT enabling/starting any sdr-source@ instance: the dx-R2 is
 # single-client and the live radio claims it at boot. Start a source server by
 # hand only after stopping sdr-fm@active, in an attended window.
+#
+# Exception (by hand, at cutover — not here): sdr-source@rtl-2838 MAY be
+# enabled at boot once the Pi's EMS job is retired (SCHEDULER_EMS_DEFAULT=false)
+# — its only client is the rack scanner-compute, so there is no contention.
 echo "==> provisioning complete (units laid down, not started)"
 %{ for id, dev in devices ~}
 echo "    device '${id}' -> sdr-source@${id} on port ${dev.port} (${dev.soapy_args})"

@@ -4,6 +4,34 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-10 (later) — Compute tier built, P25 LIVE on the rack
+
+**State: re-sequenced (compute before radio hardware). op25 on scanner-compute
+decodes MOSWIN; /ems.mp3 rack-sourced; Pi throttle gone (load 0.4, 61 °C).**
+
+- Built `scanner-compute` (LXC 901/.83) + `radio-compute` (LXC 902/.84) for
+  real: full provisioning (op25 gr310 build + gr-osmosdr/soapy verify +
+  liquidsoap chain; csdr/nrsc5/SatDump toolchain). Registry-rendered client
+  envs are ALWAYS rewritten → Airspy R2 / HF+ / RTL v4 join via registry flip
+  + re-apply (active scanner source flips automatically: airspy-r2 sorts
+  before rtl-2838).
+- Added interim `rtl-2838` registry device (SoapyRemote CU8 @ 2.4 Msps, port
+  55005) — same transport the R2 will use. Pi: SDRTrunk retired
+  (`SCHEDULER_EMS_DEFAULT=false`), `sdr-source@rtl-2838` enabled at boot,
+  Icecast on-demand relay keeps public `/ems.mp3` alive.
+- Verified end-to-end: P25 Phase II voice following + real audio on
+  `icecast.rg2.io/ems.mp3`; `/fm.mp3` untouched throughout.
+- Interim dark: `/ems-{fire,police,interop}`, `/monitor.mp3`, EMS call
+  transcripts (scanner v2 app work restores them on R2 arrival). Full record
+  + rollback + new gotchas (remote-exec masking! grep -q SIGPIPE! TUNER gain!)
+  in `deployment_notes.md`.
+
+**Next:** when the Airspy R2 arrives — flip registry (airspy-r2 true,
+rtl-2838 false), re-apply, retune op25 config; scanner v2 app work (multi-mount,
+monitor, transcripts). Radio domain per the existing plan; raise
+rmem_max/wmem_max on THEBEAST (host kernel) before any >5 Msps stream into an
+LXC.
+
 ## 2026-06-10 — Distribution tier stood up (no cutover)
 
 **State: rack Icecast LIVE at 192.168.6.82 (LXC 900). Production untouched.**

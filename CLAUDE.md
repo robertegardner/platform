@@ -9,18 +9,27 @@ lives in the sibling repos `radio` (v2) and `scanner` (v2); this repo owns the
 device registry, the source/mount contracts, and the Terraform that stands the
 whole thing up.
 
-## Current state (2026-06-10)
+## Current state (2026-06-10, post P25 cutover)
 
 - **Phase 0 GO:** dx-R2 → SoapyRemote → rack proven at 8 Msps CS16 (120 s,
-  0 drops). Only `dx-r2` is `present: true` in the device registry.
-- **Distribution LIVE, no cutover:** rack Icecast on LXC **900**
-  (192.168.6.82), verified end-to-end. `icecast.rg2.io` still proxies to the
-  **Pi's** Icecast — all five V1 mounts (`/fm.mp3`, `/ems*.mp3`) still source
-  Pi-side. Cutover is per-domain at each compute phase (runbook in
-  `deployment_notes.md`).
-- **Waiting on hardware:** scanner-compute (.83/vmid 901) and radio-compute
-  (.84/902) need the Airspy R2 / HF+ / RTL v4. Platform claims IPs
-  192.168.6.82+ and vmids 900+.
+  0 drops).
+- **Distribution LIVE:** rack Icecast on LXC **900** (192.168.6.82).
+  `icecast.rg2.io` still proxies to the **Pi's** Icecast (NPMplus repoint is
+  last).
+- **P25 LIVE on the rack (re-sequenced ahead of radio hardware):**
+  `scanner-compute` (LXC **901**, .83) runs op25 against the interim
+  `rtl-2838` registry device (SoapyRemote from the Pi, port 55005) and
+  publishes `/ems.mp3` to the rack Icecast; the Pi Icecast relays it
+  on-demand so the public URL still works. SDRTrunk is retired on the Pi
+  (`SCHEDULER_EMS_DEFAULT=false`). Interim-dark: `/ems-{fire,police,interop}`,
+  `/monitor.mp3`, EMS transcripts (see `deployment_notes.md`).
+- **radio-compute staged:** LXC **902** (.84) carries the full toolchain
+  (csdr/nrsc5/SatDump/SoapyRemote client) + registry-rendered source envs,
+  nothing enabled — dx-R2 stays with the live Pi radio until the radio cutover.
+- **Waiting on hardware:** Airspy R2 (flip `airspy-r2` true + `rtl-2838`
+  false, re-apply), HF+ and RTL v4 (registry flips). Before any >5 Msps stream
+  into an LXC: raise `net.core.{r,w}mem_max` on **thebeast** (host kernel —
+  read-only inside unprivileged LXCs).
 
 ## Hosts & roles
 
@@ -159,7 +168,16 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   and the live radio claims it at boot. Start a source server only in an
   attended window (stop `sdr-fm@active` first; arm a `systemd-run --on-active`
   dead-man that restores the radio; restore + verify `icecast.rg2.io/fm.mp3`
-  when done).
+  when done). **Exception:** `sdr-source@rtl-2838` is enabled at boot — its
+  only client is the rack scanner; no contention.
+- **`remote-exec` inline runs WITHOUT `set -e`** — always chain
+  `script && rm -f script` in one line or failures are masked as success.
+- **`grep -q` after a pipe + `pipefail` = SIGPIPE race** (fails on genuine
+  matches). Use `grep ... >/dev/null` in provisioning checks.
+- **op25:** R820T gain element is `TUNER` (wrong names silently ignored →
+  deaf dongle); audio to Icecast goes via liquidsoap + audio.py (`mksafe` —
+  op25 emits UDP PCM only during calls; bare ffmpeg stalls and drops the
+  mount); needs `python3-setuptools` on noble.
 
 ## Bring-up order
 

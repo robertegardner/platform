@@ -100,11 +100,11 @@ resource "null_resource" "provision" {
     destination = "/tmp/provision-icecast.sh"
   }
 
+  # Single && chain so a failing script can't be masked by the rm -f exiting 0
+  # (remote-exec inline runs without set -e — bit us on radio-compute 2026-06-10).
   provisioner "remote-exec" {
     inline = [
-      "chmod +x /tmp/provision-icecast.sh",
-      "/tmp/provision-icecast.sh",
-      "rm -f /tmp/provision-icecast.sh",
+      "chmod +x /tmp/provision-icecast.sh && /tmp/provision-icecast.sh && rm -f /tmp/provision-icecast.sh",
     ]
   }
 }

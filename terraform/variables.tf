@@ -106,6 +106,19 @@ variable "icecast_admin_password" {
   sensitive   = true
 }
 
+# --- Compute tier (rack LXCs) --------------------------------------------------
+variable "scanner_compute_ip" {
+  description = "Static IP of the scanner-compute LXC"
+  type        = string
+  default     = "192.168.6.83"
+}
+
+variable "radio_compute_ip" {
+  description = "Static IP of the radio-compute LXC"
+  type        = string
+  default     = "192.168.6.84"
+}
+
 # --- Pi acquisition node (bare metal, SSH target) -----------------------------
 variable "pi_host" {
   description = "Hostname/IP of the radio acquisition Pi (resolves from thebeast)"

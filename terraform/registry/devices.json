@@ -32,6 +32,23 @@
       "bias_tee": false,
       "usb_controller": "A"
     },
+    "rtl-2838": {
+      "_comment": "INTERIM scanner source — the existing Nooelec RTL2838 that ran SDRTrunk on the Pi until the 2026-06 P25 offload. Serves the scanner domain over SoapyRemote (same transport the R2 will use) until the Airspy R2 arrives; then flip this to present:false and airspy-r2 to true in the same change. Single client = rack op25; the Pi-side monitor/manual-tune rtl_fm jobs lose the dongle while this is present.",
+      "present": true,
+      "soapy_args": "driver=rtlsdr",
+      "antenna": "single",
+      "feed": "discone",
+      "filter": "none",
+      "role": "scanner-p25-interim",
+      "domain": "scanner",
+      "transport": "soapy-remote",
+      "wire_format": "CU8",
+      "endpoint": "tcp://radio.srvr:55005",
+      "port": 55005,
+      "sample_rate_default": 2400000,
+      "bias_tee": false,
+      "usb_controller": "A"
+    },
     "airspy-r2": {
       "present": false,
       "soapy_args": "driver=airspy",

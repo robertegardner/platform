@@ -140,6 +140,86 @@ failed target block `-target` re-provisions of the others.
 4. `radio-compute` — mux/stereo/AM/SatDump against remote sources, per
    `MULTISTATION_STEREO_BUILD.md`.
 
+## Compute tier bring-up + P25 cutover (2026-06-10): re-sequenced, LIVE
+
+**Sequencing change (user decision):** compute LXCs built BEFORE the radio
+hardware upgrades. P25 decode moved off the Pi now, using the existing
+RTL2838 as an interim scanner-domain source; radio-compute is toolchain-staged
+so the dx-R2 cutover + HF+/RTL-v4 joins are registry flips when hardware lands.
+
+**What runs where now:**
+
+- **scanner-compute (LXC 901, .83):** op25 (boatbod, gr310) trunk-following
+  Cape County MOSWIN (P25 Phase II, CC 769.16875 MHz, NAC 0x1CC, C4FM) from
+  `driver=remote,remote=tcp://radio.srvr:55005,remote:driver=rtlsdr` →
+  liquidsoap → rack Icecast `/ems.mp3` ("MOSWIN All", 32k). Units:
+  `op25-ems.service` + `ems-stream.service` (enabled, running). op25 http
+  terminal on :8080.
+- **Pi:** `sdr-source@rtl-2838` (SoapyRemote, port 55005) enabled at boot —
+  safe: its only client is the rack (no dx-R2-style contention).
+  `SCHEDULER_EMS_DEFAULT=false` in `/etc/scanner/config.env`
+  (`.bak-20260610` alongside) — the scheduler no longer spawns SDRTrunk.
+  Pi Icecast carries an on-demand `<relay>` of `/ems.mp3` from the rack
+  (marked `platform-cutover` in icecast.xml, `.bak-20260610` alongside) so
+  `icecast.rg2.io/ems.mp3` keeps working until the NPMplus repoint.
+- **radio-compute (LXC 902, .84):** toolchain staged (SoapyRemote client,
+  csdr [jketterl], nrsc5, SatDump, ffmpeg) + registry-rendered source envs.
+  NOTHING enabled — the dx-R2 stays with the live radio until the radio
+  cutover; the radio repo's deploy.sh owns app code (two-cadence).
+
+**Verified:** remote R820T probe from the LXC; op25 control-channel decode +
+voice grants followed across talkgroups; `/ems.mp3` on the rack Icecast
+serving valid 32 kbps MP3 with real voice audio (mean −37 dB, peaks −3 dB);
+public `https://icecast.rg2.io/ems.mp3` via the Pi relay; `/fm.mp3` untouched
+(200) throughout; Pi load fell from SDRTrunk-era ~51%-CPU to 0.4, 61 °C.
+
+**Interim regressions (restored by scanner v2 app work when the R2 lands):**
+- `/ems-fire`, `/ems-police`, `/ems-interop` are dark — the single op25 stream
+  carries ALL talkgroups (same content as V1's `/ems.mp3` catch-all). The
+  per-category split was an SDRTrunk alias-stream feature.
+- `/monitor.mp3` + scanner-ui manual tunes are dead: the dongle is dedicated
+  to the remote source 24/7 (rtl_fm can't share it).
+- EMS call recordings/transcripts stopped (they were SDRTrunk recordings;
+  scanner-transcribe still runs but has nothing to ingest).
+
+**Rollback (any time):** stop `op25-ems`/`ems-stream` on .83; on the Pi
+`systemctl disable --now sdr-source@rtl-2838`, restore
+`SCHEDULER_EMS_DEFAULT=true`, `systemctl restart scanner-scheduler` —
+SDRTrunk reclaims the dongle and the V1 mounts return. Remove the relay block
+from icecast.xml (or restore the .bak) + reload.
+
+**Provisioning gotchas surfaced this phase (encoded in the templates):**
+- **`remote-exec` inline lines run WITHOUT `set -e`** — an unchained
+  `script.sh` followed by `rm -f` masked real failures as success. All
+  provisioners now use a single `&&` chain. (Two "successful" applies were
+  actually half-provisioned.)
+- **`grep -q` after a pipe under `pipefail` is a SIGPIPE race** — `-q` exits
+  at first match, the producer dies of SIGPIPE, the pipeline reports failure
+  on a GENUINE match. Use `grep ... >/dev/null` in provisioning checks.
+- **op25 needs `python3-setuptools` on noble** (Python 3.12 removed distutils;
+  cmake's probe needs the setuptools shim), and the build marker is only set
+  after `from gnuradio import op25, op25_repeater` succeeds.
+- **R820T gain element is `TUNER`** — op25 `--gains 'lna:38'` is silently
+  ignored and the dongle stays deaf (no decode, just sync-search). Hours-saver:
+  probe gain element names first (`SoapySDRUtil --probe`).
+- **op25 → Icecast must go through liquidsoap** (audio.py UDP bridge +
+  `mksafe`): op25 emits UDP PCM only DURING calls; a bare ffmpeg chain stalls
+  between calls and Icecast drops the source. Based on op25's
+  example_liquidsoap_V2.2.4-2.
+- **nrsc5:** bundled librtlsdr ExternalProject breaks on noble — build with
+  `-DUSE_SYSTEM_RTLSDR=ON` (+ `librtlsdr-dev`); faad2 stays bundled (HDC
+  patches). **csdr:** use the jketterl fork (cmake); upstream ha7ilm's
+  Makefile half-installs a broken binary on noble (hence the marker guard).
+- **SatDump needs `libnng-dev`** on noble.
+- **icecast.env is root-only (0600)** and injected via the unit's
+  `EnvironmentFile` — the scanner-user scripts must not source it themselves.
+
+**Prerequisite for the HIGH-RATE phases (R2 full rate / dx-R2 8 Msps into
+radio-compute):** `net.core.rmem_max`/`wmem_max` are HOST-global and read-only
+inside unprivileged LXCs — raise them on **thebeast** (one-time root step,
+like the Phase 0B Pi fix) before expecting >5 Msps SoapyRemote streams into
+the containers. The interim 2.4 Msps CU8 stream fits the defaults.
+
 ## Distribution tier bring-up (2026-06-10): rack Icecast LIVE, no cutover
 
 `module.distribution` applied: LXC **900** (`distribution`, 192.168.6.82, 1
