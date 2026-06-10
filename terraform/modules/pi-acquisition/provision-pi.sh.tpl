@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Rendered by Terraform (templatefile) and executed as root on the Pi
+# (radio.srvr) via `sudo` over SSH from thebeast. Acquisition tier: brings up one
+# SoapyRemote source server per PRESENT device from the device registry.
+#
+# RE-RUN SAFE / build-if-absent. Does NOT rebuild SoapySDR or SoapySDRPlay3
+# (already built from source on the Pi). Does NOT enable or start any source
+# unit — that would auto-claim a single-client device (the dx-R2) at boot against
+# the live radio (sdr-fm@active). Source servers are started by hand inside an
+# attended window only. See CLAUDE.md / the Phase 0 build prompt.
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+echo "==> SoapyRemote server (build-if-absent)"
+if command -v SoapySDRServer >/dev/null 2>&1; then
+  echo "    SoapySDRServer already present - keeping it"
+else
+  apt-get update -qq || true
+  # Debian ships the SoapyRemote server + client module in soapysdr-module-remote.
+  if apt-get install -y -qq soapysdr-module-remote soapysdr-tools; then
+    echo "    installed soapysdr-module-remote via apt"
+  fi
+  if ! command -v SoapySDRServer >/dev/null 2>&1; then
+    echo "    apt did not provide SoapySDRServer - building SoapyRemote from source"
+    apt-get install -y -qq git cmake g++ make libsoapysdr-dev pkg-config
+    tmp="$(mktemp -d)"
+    git clone --depth 1 https://github.com/pothosware/SoapyRemote.git "$tmp/SoapyRemote"
+    cmake -S "$tmp/SoapyRemote" -B "$tmp/SoapyRemote/build" -DCMAKE_BUILD_TYPE=Release
+    cmake --build "$tmp/SoapyRemote/build" -j"$(nproc)"
+    cmake --install "$tmp/SoapyRemote/build"
+    rm -rf "$tmp"
+  fi
+fi
+command -v SoapySDRServer >/dev/null 2>&1 || { echo "FATAL: SoapySDRServer still missing"; exit 1; }
+
+echo "==> SDRplay loader path fix"
+# SoapySDRPlay3 lives in /usr/local/lib and needs libsdrplay_api.so.3 (also in
+# /usr/local/lib), which is not on this host's default loader path. Without this,
+# the source server cannot dlopen the SDRplay module and the dx-R2 won't open.
+echo "/usr/local/lib" > /etc/ld.so.conf.d/usrlocal-sdrplay.conf
+ldconfig
+
+echo "==> Per-device source environment files"
+mkdir -p /etc/sdr-source
+%{ for id, dev in devices ~}
+if [ -f /etc/sdr-source/${id}.env ]; then
+  echo "    /etc/sdr-source/${id}.env exists - keeping it"
+else
+  cat > /etc/sdr-source/${id}.env <<'EOF'
+# Source server config for device '${id}' (rendered from the device registry).
+SOAPY_PORT=${dev.port}
+SOAPY_DEVICE_ARGS=${dev.soapy_args}
+EOF
+  echo "    wrote /etc/sdr-source/${id}.env (port ${dev.port})"
+fi
+%{ endfor ~}
+
+echo "==> sdr-source@.service unit"
+# %i is the device id; SOAPY_PORT comes from /etc/sdr-source/%i.env. With a
+# single present device a lone server is fine (per-device isolation-by-serial is
+# a later decision per the architecture doc).
+cat > /etc/systemd/system/sdr-source@.service <<'EOF'
+[Unit]
+Description=SoapyRemote source server for %i (acquisition tier)
+After=network-online.target sdrplay.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/sdr-source/%i.env
+Environment=LD_LIBRARY_PATH=/usr/local/lib
+ExecStart=/usr/bin/SoapySDRServer --bind=0.0.0.0:$${SOAPY_PORT}
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+
+# Intentionally NOT enabling/starting any sdr-source@ instance: the dx-R2 is
+# single-client and the live radio claims it at boot. Start a source server by
+# hand only after stopping sdr-fm@active, in an attended window.
+echo "==> provisioning complete (units laid down, not started)"
+%{ for id, dev in devices ~}
+echo "    device '${id}' -> sdr-source@${id} on port ${dev.port} (${dev.soapy_args})"
+%{ endfor ~}

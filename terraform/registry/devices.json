@@ -1,0 +1,67 @@
+{
+  "_comment": "Device registry — source of truth for device -> antenna -> filter -> band -> domain -> endpoint. Replaces the RF switch. The pi-acquisition provisioner iterates `present: true` devices only; flip present + re-apply to join a new tuner. See docs/acquisition_tier.md and docs/PLATFORM_V2_ARCHITECTURE.md.",
+  "devices": {
+    "dx-r2": {
+      "present": true,
+      "soapy_args": "driver=sdrplay",
+      "antenna": "Antenna A",
+      "feed": "Shakespeare 5120",
+      "filter": "FM bandpass",
+      "role": "fm-multistation",
+      "domain": "radio",
+      "transport": "soapy-remote",
+      "wire_format": "CS16",
+      "endpoint": "tcp://radio.srvr:55001",
+      "port": 55001,
+      "sample_rate_max": 8000000,
+      "bias_tee": false,
+      "usb_controller": "A"
+    },
+    "hf-plus": {
+      "present": false,
+      "soapy_args": "driver=airspyhf",
+      "antenna": "single",
+      "feed": "YouLoop (primary) / long-wire (alt)",
+      "filter": "HF choke on long-wire",
+      "role": "am-broadcast",
+      "domain": "radio",
+      "transport": "soapy-remote",
+      "wire_format": "CS16",
+      "endpoint": "tcp://radio.srvr:55002",
+      "port": 55002,
+      "bias_tee": false,
+      "usb_controller": "A"
+    },
+    "airspy-r2": {
+      "present": false,
+      "soapy_args": "driver=airspy",
+      "antenna": "single",
+      "feed": "discone",
+      "filter": "Flamingo FM band-stop",
+      "role": "scanner-terrestrial",
+      "domain": "scanner",
+      "transport": "soapy-remote",
+      "wire_format": "CS16",
+      "endpoint": "tcp://radio.srvr:55003",
+      "port": 55003,
+      "sample_rate_default": 2500000,
+      "bias_tee": false,
+      "usb_controller": "B"
+    },
+    "rtl-v4": {
+      "present": false,
+      "soapy_args": "driver=rtlsdr",
+      "antenna": "single",
+      "feed": "V-dipole",
+      "filter": "Sawbird+ NOAA (LNA)",
+      "role": "meteor-lrpt",
+      "domain": "radio",
+      "transport": "soapy-remote",
+      "wire_format": "CU8",
+      "endpoint": "tcp://radio.srvr:55004",
+      "port": 55004,
+      "bias_tee": true,
+      "usb_controller": "B"
+    }
+  }
+}

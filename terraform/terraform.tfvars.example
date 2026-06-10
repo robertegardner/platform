@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars ON THEBEAST ONLY (gitignored — never commit).
+# The Proxmox token is the same one homelab-monitor uses; reuse those values.
+
+# --- Proxmox connection (compute/distribution phases) ---
+pm_api_url          = "https://192.168.6.163:8006/api2/json"
+pm_api_token_id     = "deploy@pve!terraform"
+pm_api_token_secret = "REPLACE-WITH-TOKEN-UUID"
+pm_node             = "thebeast"
+pm_tls_insecure     = true
+
+# --- Pi acquisition node ---
+pi_host              = "radio.srvr" # set to 192.168.6.18 if thebeast can't resolve it
+pi_ssh_user          = "rgardner"
+ssh_private_key_path = "~/.ssh/id_ed25519"
