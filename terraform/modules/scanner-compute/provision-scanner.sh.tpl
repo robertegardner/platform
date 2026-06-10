@@ -102,6 +102,43 @@ else
   touch /opt/op25/.platform-built-v2
 fi
 
+echo "==> op25 http console hardening (idempotent patch)"
+# Upstream http_server.py calls sys.exit(1) on ANY malformed request — a
+# proxy health-check or stray POST kills the web console while the decoder
+# keeps running (bit us 2026-06-10: both UIs "waiting for data" behind NPM).
+# Patch to log + answer 500 instead. Warn-only if upstream shape changed.
+python3 - <<'PYEOF' || echo "    WARNING: http_server.py patch did not apply (upstream changed?)"
+import sys
+p = "/opt/op25/op25/gr-op25_repeater/apps/http_server.py"
+s = open(p).read()
+if "platform-patched" in s:
+    print("    http_server.py already patched")
+    sys.exit(0)
+old = """    failed = False
+    try:
+        result = http_request(environ, start_response)
+    except Exception:
+        failed = True
+        sys.stderr.write('application: request failed:\\n%s\\n' % traceback.format_exc())
+        sys.exit(1)
+    return result"""
+new = """    # platform-patched: a malformed request must not kill the console
+    # (upstream sys.exit(1) leaves the decoder running but the web UI dead).
+    try:
+        result = http_request(environ, start_response)
+    except Exception:
+        sys.stderr.write('application: request failed:\\n%s\\n' % traceback.format_exc())
+        try:
+            start_response('500 Internal Server Error', [('Content-type', 'text/plain')])
+        except Exception:
+            pass
+        return [b'']
+    return result"""
+assert old in s
+open(p, "w").write(s.replace(old, new, 1))
+print("    http_server.py patched")
+PYEOF
+
 echo "==> MOSWIN P25 config (written-if-absent — hand-tuned on air, do not clobber)"
 # Cape County MOSWIN, proven on air by the Pi SDRTrunk bring-up (2026-06):
 # control channel 769.16875 MHz, NAC 0x1CC, system 0x1CE, WACN 0xBEE00,
@@ -151,9 +188,12 @@ set -euo pipefail
 GAINS="TUNER:38"
 
 cd /opt/op25/op25/gr-op25_repeater/apps
+# -V -w (vocoder + UDP PCM out to 127.0.0.1:23456), NOT -U: -U additionally
+# spawns op25's own UDP player, which BINDS the port that ems-stream's
+# audio.py needs — a restart-order lottery (bit us 2026-06-10).
 exec ./rx.py --nocrypt --args "$OSMOSDR_ARGS" --gains "$GAINS" \
   -S "$SAMPLE_RATE" -q 0 -T /opt/scanner-compute/moswin-trunk.tsv \
-  -2 -V -U -v 1 -l 'http:0.0.0.0:8080' \
+  -2 -V -w -v 1 -l 'http:0.0.0.0:8080' \
   2>>/var/lib/scanner-compute/op25-stderr.log
 EOF
   chmod +x /opt/scanner-compute/run-op25.sh
@@ -201,12 +241,20 @@ cat > /etc/systemd/system/op25-ems.service <<'EOF'
 Description=op25 P25 trunk receiver (Cape County MOSWIN, remote source)
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=scanner
 Group=scanner
 WorkingDirectory=/var/lib/scanner-compute
+# SIGINT + settle: killing the SoapyRemote client mid-stream wedges the
+# server-side device session (same pattern as the dx-R2/FM side) — rx.py
+# tears down cleanly on SIGINT; the pre-start sleep lets the server finish
+# releasing the dongle before the reopen.
+KillSignal=SIGINT
+TimeoutStopSec=15
+ExecStartPre=/bin/sleep 2
 ExecStart=/opt/scanner-compute/run-op25.sh
 Restart=on-failure
 RestartSec=10s

@@ -190,11 +190,31 @@ rds_watcher on the rack.
   `ExecStartPre=sleep 2` (server release settle), and
   `StartLimitIntervalSec=0` (never strand the mount). Verified: 3/3
   consecutive API tunes recovered the mount in <18 s with clean audio.
-- **op25 web console:** the NEW UI (index.html) is built for `multi_rx.py`
-  and shows "waiting for data" under our interim single-receiver `rx.py` —
-  use the **legacy page** (`/legacy-index.html`) until scanner v2 moves to
-  multi_rx. The console has no audio player by design; listen at
+- **op25 web console — three stacked faults found 2026-06-10 (all fixed):**
+  (1) upstream `http_server.py` calls `sys.exit(1)` on any malformed request
+  — a stray POST/health-check killed the console while the decoder kept
+  running ("waiting for data" on every page). Patched to log+500; the patch
+  is applied idempotently by the provisioner (marker: `platform-patched`).
+  (2) `rx.py -U` spawns op25's own UDP player which BINDS 23456 — the same
+  port ems-stream's audio.py needs; whoever started second lost (restart
+  lottery). Now `-V -w` (same UDP PCM out, no player).
+  (3) Abrupt op25 kills wedge BOTH the SoapyRemote session AND the RTL2838
+  itself (USB claim error -6 persists until a usb reset — V1's scheduler
+  reset the dongle between jobs for exactly this). op25-ems unit now uses
+  KillSignal=SIGINT + settle + StartLimitIntervalSec=0 like the FM unit.
+  Recovery for a wedged dongle: stop op25-ems → on the Pi stop
+  sdr-source@rtl-2838, `usbreset 0bda:2838` (or
+  `python3 -c "...lib.sdr reset_dongle"` from /opt/scanner), start source →
+  start op25-ems.
+  The console has no audio player by design; listen at
   `https://icecast.rg2.io/ems.mp3`.
+- **Radio stream dies after ~2 min (OPEN — needs thebeast root):**
+  `readStream read failed: -1` mid-run. The FM wire is 2 Msps CS16 (~64 Mbps
+  — rx_fm decimates client-side, NOT server-side) and thebeast's host kernel
+  has the 4 MB default socket buffers (the exact Phase 0B failure value; LXCs
+  can't raise them). One-time root step on thebeast:
+  `sysctl -w net.core.rmem_max=104857600 net.core.wmem_max=104857600` +
+  persist in `/etc/sysctl.d/10-sdr-platform.conf`.
 - **Ops gotcha — wedged dx-R2 source:** if clients flap with "Failed to open
   sdr device" after device juggling, do the ordered bounce: stop client
   (.84 `sdr-fm@active`) → on the Pi `systemctl stop sdr-source@dx-r2 &&
