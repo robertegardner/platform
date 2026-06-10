@@ -4,6 +4,27 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-10 (evening) — Radio domain cut over: FM LIVE on the rack
+
+**State: the Pi is now a pure acquisition node. Both audio domains decode
+rack-side; all V1 DSP services on the Pi are retired (sdr-fm@active masked).**
+
+- radio-compute gained rx_tools + redsea (toolchain) and `fm-stream.service` —
+  the exact V1 stream.sh FM pipeline against `driver=remote` dx-R2 (sdrplay
+  decimates server-side; ~1 MB/s wire). RDS lands in rds-latest.json.
+- Cutover with dead-man; `sdr-source@dx-r2` enabled at boot; Pi `/fm.mp3`
+  on-demand relay added (NPM was reverted to the Pi after an early repoint
+  broke /fm.mp3 — public names work through the two Pi relays until the
+  proper NPM repoint, which then retires the relays + Pi icecast).
+- Interim: tuner-UI retune/HD/AM dead (retune = fm.env edit on .84);
+  multistation stereo mux remains the radio repo's v2 project, now with a
+  ready rack target.
+- NEW: codeserver has rsync (user installed) — tar-over-ssh no longer needed.
+
+**Next:** radio repo v2 (stereo mux per MULTISTATION_STEREO_BUILD plan,
+targeting .84); scanner v2 app on R2 arrival; NPM repoint LAST (removes
+relays, disables Pi icecast).
+
 ## 2026-06-10 (later) — Compute tier built, P25 LIVE on the rack
 
 **State: re-sequenced (compute before radio hardware). op25 on scanner-compute

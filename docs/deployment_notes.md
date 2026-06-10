@@ -140,6 +140,48 @@ failed target block `-target` re-provisions of the others.
 4. `radio-compute` — mux/stereo/AM/SatDump against remote sources, per
    `MULTISTATION_STEREO_BUILD.md`.
 
+## Radio domain cutover (2026-06-10, same day): FM LIVE on the rack
+
+The dx-R2 was handed from the Pi's V1 chain to the platform source server and
+FM now decodes on radio-compute — a **V1-parity port**, not the stereo mux
+(that's still the radio repo's v2 project; HD/nrsc5 and AM modes also remain
+Pi-repo app work, currently unavailable).
+
+- **Pi:** `sdr-fm@active` stopped, disabled and **masked** (the tuner UI's
+  restart path would otherwise fight the source server for the dx-R2 —
+  unmask+enable for rollback). `sdr-source@dx-r2` (port 55001) enabled at
+  boot. Cutover used the dead-man pattern (15 min `systemd-run` restore,
+  disarmed after verification).
+- **radio-compute:** `fm-stream.service` runs the exact V1 pipeline —
+  `rx_fm` (driver=remote, Antenna A, 250k out / 2 Msps hardware, gain 30,
+  99.3 MHz) | tee → `redsea` (RDS → `/var/lib/radio-compute/rds-latest.json`)
+  | `ffmpeg` (75 µs de-emphasis, 15 kHz lowpass, 256k MP3) → rack Icecast
+  `/fm.mp3`. Config: `/etc/radio-compute/fm.env` (hand-tunable,
+  written-if-absent).
+- **Pi Icecast** now carries TWO on-demand relays (`/fm.mp3`, `/ems.mp3`) —
+  NPM (reverted by user to point at the Pi) serves the public names through
+  them. At the eventual NPM repoint to .82, remove both relay blocks and
+  disable the Pi's icecast2 per the original runbook.
+- **Verified:** rack mount live (mean −22 dB / peaks −11 dB program audio);
+  public `icecast.rg2.io/fm.mp3` 200 @ 256k through the relay;
+  `sdr-captions` reconnected (reads `localhost:8000/fm.mp3` → relay pulls
+  from the rack on demand — no config change needed).
+- **Interim degradations:** tuner-UI retune/HD/AM dead (UI still renders;
+  its `systemctl restart sdr-fm@active` path is masked). Retune = edit
+  `/etc/radio-compute/fm.env` + `systemctl restart fm-stream` on .84.
+  `rds_watcher.py`/now-playing integration not ported (only
+  `rds-latest.json` lands rack-side). **Follow-up:** no RDS groups decoded
+  yet on .84 (redsea 1.3.1 runs and consumes the MPX but emits nothing —
+  not debugged to avoid restarting the live stream; the Pi ran an older
+  redsea, so suspect a version behavior difference first).
+- **Rollback:** on .84 `systemctl disable --now fm-stream`; on the Pi
+  `systemctl disable --now sdr-source@dx-r2`, `systemctl unmask sdr-fm@active`,
+  `systemctl enable --now... ` (use `enable` + `start`), remove the `/fm.mp3`
+  relay block, reload icecast2.
+- **Gotchas:** redsea needs `libliquid-dev` (meson build); rx_tools needs
+  `libsoapysdr-dev`; env files sourced by shell scripts must quote values
+  with spaces (`ANTENNA='Antenna A'` — unquoted it executes `A`).
+
 ## Compute tier bring-up + P25 cutover (2026-06-10): re-sequenced, LIVE
 
 **Sequencing change (user decision):** compute LXCs built BEFORE the radio

@@ -123,7 +123,10 @@ locals {
   }
 
   provision_script = templatefile("${path.module}/provision-radio.sh.tpl", {
-    devices = local.devices_rendered
+    devices                 = local.devices_rendered
+    icecast_host            = var.icecast_host
+    icecast_port            = var.icecast_port
+    icecast_source_password = var.icecast_source_password
   })
 }
 

@@ -9,27 +9,31 @@ lives in the sibling repos `radio` (v2) and `scanner` (v2); this repo owns the
 device registry, the source/mount contracts, and the Terraform that stands the
 whole thing up.
 
-## Current state (2026-06-10, post P25 cutover)
+## Current state (2026-06-10, both domains cut over)
 
-- **Phase 0 GO:** dx-R2 → SoapyRemote → rack proven at 8 Msps CS16 (120 s,
-  0 drops).
-- **Distribution LIVE:** rack Icecast on LXC **900** (192.168.6.82).
-  `icecast.rg2.io` still proxies to the **Pi's** Icecast (NPMplus repoint is
-  last).
-- **P25 LIVE on the rack (re-sequenced ahead of radio hardware):**
-  `scanner-compute` (LXC **901**, .83) runs op25 against the interim
-  `rtl-2838` registry device (SoapyRemote from the Pi, port 55005) and
-  publishes `/ems.mp3` to the rack Icecast; the Pi Icecast relays it
-  on-demand so the public URL still works. SDRTrunk is retired on the Pi
-  (`SCHEDULER_EMS_DEFAULT=false`). Interim-dark: `/ems-{fire,police,interop}`,
-  `/monitor.mp3`, EMS transcripts (see `deployment_notes.md`).
-- **radio-compute staged:** LXC **902** (.84) carries the full toolchain
-  (csdr/nrsc5/SatDump/SoapyRemote client) + registry-rendered source envs,
-  nothing enabled — dx-R2 stays with the live Pi radio until the radio cutover.
+- **The Pi is now a pure acquisition node.** `sdr-source@dx-r2` (:55001) and
+  `sdr-source@rtl-2838` (:55005) enabled at boot; ALL V1 DSP retired
+  (`sdr-fm@active` disabled+**masked** — the tuner UI's restart path must not
+  fight the source server; SDRTrunk off via `SCHEDULER_EMS_DEFAULT=false`).
+- **P25 LIVE on scanner-compute** (LXC **901**, .83): op25 on the interim
+  `rtl-2838` device → rack `/ems.mp3`. Interim-dark:
+  `/ems-{fire,police,interop}`, `/monitor.mp3`, EMS transcripts.
+- **FM LIVE on radio-compute** (LXC **902**, .84): `fm-stream.service` =
+  V1-parity rx_fm+redsea+ffmpeg chain on the remote dx-R2 → rack `/fm.mp3`
+  (retune: edit `/etc/radio-compute/fm.env` + restart). Interim-dead:
+  tuner-UI retune, HD (nrsc5 mode), AM. The stereo/multistation mux is the
+  radio repo's v2 project, targeting this LXC.
+- **Distribution:** rack Icecast on LXC **900** (.82) sources BOTH mounts.
+  `icecast.rg2.io` proxies to the **Pi's** Icecast, which carries on-demand
+  relays for `/fm.mp3` + `/ems.mp3` (marked `platform-cutover` in
+  icecast.xml). NPM repoint to .82 is LAST — it retires the relays and the
+  Pi's icecast2. (An early NPM repoint before the fm cutover 404'd the public
+  radio — don't repoint until every mount is rack-sourced.)
 - **Waiting on hardware:** Airspy R2 (flip `airspy-r2` true + `rtl-2838`
   false, re-apply), HF+ and RTL v4 (registry flips). Before any >5 Msps stream
   into an LXC: raise `net.core.{r,w}mem_max` on **thebeast** (host kernel —
   read-only inside unprivileged LXCs).
+- codeserver now has `rsync` — prefer it over tar-over-ssh for thebeast syncs.
 
 ## Hosts & roles
 
@@ -47,9 +51,11 @@ Name-resolution quirks (codeserver): use **`radio.srvr` = 192.168.6.18** (bare
 `radio`/`pi-attic` don't resolve); **thebeast only by IP** (192.168.6.163).
 **`wol.srvr` (192.168.6.24) is a DIFFERENT, unrelated Pi 4** — an ARP/OUI sweep
 finds it first; never provision it. NPMplus = 192.168.6.49 (manual LXC, not
-Terraform-managed). codeserver has no `rsync` — ship the tree to thebeast with
-tar-over-ssh (`tar czf - ... | ssh deploy@192.168.6.163 'tar xzf - -C
-/home/deploy/platform'`).
+Terraform-managed). Ship the tree to thebeast with
+`rsync -az terraform tools docs deploy@192.168.6.163:/home/deploy/platform/`.
+LXC SSH goes through thebeast (`ssh deploy@163 'ssh -i ~/.ssh/id_rsa_homelab
+root@<lxc>'`) — codeserver only holds `id_ed25519`, which the LXCs don't
+authorize.
 
 All hosts are on the **Server VLAN → `vlan_id = 0`** (native untagged). The Pi
 and LXCs are co-VLAN, so there's no routing between acquisition and compute.
@@ -164,12 +170,11 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   its first enumerable device (the busy RTL on the Pi).
 - **Default gain saturates the dx-R2 ADC** at 8 Msps (`mean|IQ|≈0.98`) — compute
   clients set sane gain at connect (source contract #4).
-- **`sdr-source@*` units stay disabled** on the Pi — the dx-R2 is single-client
-  and the live radio claims it at boot. Start a source server only in an
-  attended window (stop `sdr-fm@active` first; arm a `systemd-run --on-active`
-  dead-man that restores the radio; restore + verify `icecast.rg2.io/fm.mp3`
-  when done). **Exception:** `sdr-source@rtl-2838` is enabled at boot — its
-  only client is the rack scanner; no contention.
+- **`sdr-source@{dx-r2,rtl-2838}` are enabled at boot** (post-cutover: the
+  rack compute LXCs are their only clients). The old rule — sources disabled
+  because the Pi radio claimed the dx-R2 — is retired along with
+  `sdr-fm@active` (now masked; unmask only for rollback). Devices remain
+  single-client: never point a second consumer at a served device.
 - **`remote-exec` inline runs WITHOUT `set -e`** — always chain
   `script && rm -f script` in one line or failures are masked as success.
 - **`grep -q` after a pipe + `pipefail` = SIGPIPE race** (fails on genuine

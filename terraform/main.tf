@@ -93,5 +93,7 @@ module "radio_compute" {
   ssh_public_key       = var.ssh_public_key
   ssh_private_key_path = var.ssh_private_key_path
 
-  devices = local.radio_devices
+  devices                 = local.radio_devices
+  icecast_host            = var.distribution_ip
+  icecast_source_password = var.icecast_source_password
 }

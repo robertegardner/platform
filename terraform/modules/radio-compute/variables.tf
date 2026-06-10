@@ -64,3 +64,20 @@ variable "devices" {
   description = "Radio-domain devices from the registry (present only) — drives the SoapyRemote client config"
   type        = map(any)
 }
+
+variable "icecast_host" {
+  description = "Rack Icecast host the radio domain publishes to (distribution LXC)"
+  type        = string
+}
+
+variable "icecast_port" {
+  description = "Rack Icecast port"
+  type        = number
+  default     = 8000
+}
+
+variable "icecast_source_password" {
+  description = "Icecast source-client password"
+  type        = string
+  sensitive   = true
+}
