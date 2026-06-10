@@ -4,6 +4,26 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-10 (night) — RDS verdict + radio GUI on the rack
+
+**State: sdr-tuner UI live at 192.168.6.84:8080 (V1 contract, app.py
+unmodified); captions orchestrator moved to .84; RDS closed as no-defect.**
+
+- RDS A/B: rack chain decodes KGMO 100.7 richly; 99.3 fails even via the
+  Pi's local rx_fm — that station's RDS is just weak (V1 only ever had
+  PI+PTY). rds_watcher now runs in the rack pipeline (now_playing.json).
+- Replaced interim fm-stream contract with V1 sdr-streams contract on .84
+  (active.env + sdr-fm@active + stream.sh wbfm-only, exit 78 for HD/AM).
+  App code deployed from the radio repo checkout; station data copied from
+  the Pi; sdr-captions runs rack-side now (Pi instance disabled).
+- Scanner GUI = op25 console at .83:8080. NPM (user): radio.rg2.io → .84:8080,
+  scanner.rg2.io → .83:8080.
+- Ops gotcha recorded: wedged dx-R2 source needs the ordered bounce
+  (stop client → restart sdrplay + source on Pi → reset-failed + start client).
+
+**Next:** radio repo v2 (stereo mux; HD/AM rack-side; deploy-to-rack target
+in its deploy.sh); scanner v2 on R2 arrival; NPM repoint last.
+
 ## 2026-06-10 (evening) — Radio domain cut over: FM LIVE on the rack
 
 **State: the Pi is now a pure acquisition node. Both audio domains decode

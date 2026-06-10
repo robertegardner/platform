@@ -13,7 +13,7 @@ echo "==> base packages"
 apt-get update -qq
 apt-get install -y -qq \
   soapysdr-tools soapysdr-module-remote python3-soapysdr libsoapysdr-dev \
-  ffmpeg sox python3-venv python3-numpy python3-scipy \
+  ffmpeg sox python3-venv python3-numpy python3-scipy python3-flask python3-requests \
   git cmake build-essential pkg-config curl \
   autoconf automake libtool meson ninja-build \
   libusb-1.0-0-dev libudev-dev librtlsdr-dev \
@@ -136,55 +136,90 @@ EOF
   chmod 0600 /etc/radio-compute/icecast.env
 fi
 
-echo "==> FM chain (written-if-absent — hand-tuned, do not clobber)"
-# Interim V1-parity chain: the exact Pi stream.sh FM pipeline (rx_fm | tee
-# redsea | ffmpeg) against the remote dx-R2. The multistation stereo mux
-# (radio repo v2) replaces this; HD (nrsc5) and AM (am_stream.py) modes stay
-# Pi-repo app work for now.
-if [ -f /etc/radio-compute/fm.env ]; then
-  echo "    fm.env exists - keeping it"
+echo "==> V1 sdr-streams contract (GUI moved 2026-06-10; replaces the interim fm-stream/fm.env contract)"
+# The sdr-tuner Flask UI (app code from the radio repo, deployed separately —
+# two-cadence rule) speaks the V1 contract unmodified: it writes
+# /etc/sdr-streams/active.env and restarts sdr-fm@active. The rack stream.sh
+# implements the wbfm/fm branch only; HD (nrsc5) and AM (am_stream.py) are
+# radio-repo v2 work and exit 78 (RestartPreventExitStatus — no flap loop).
+mkdir -p /etc/sdr-streams /var/lib/sdr-streams /opt/sdr-tuner
+chown -R radio:radio /var/lib/sdr-streams /opt/sdr-tuner
+
+cat > /etc/tmpfiles.d/sdr-streams.conf <<'EOF'
+d /run/sdr-streams 0755 radio radio -
+EOF
+systemd-tmpfiles --create /etc/tmpfiles.d/sdr-streams.conf
+
+if [ -f /etc/sdr-streams/active.env ]; then
+  echo "    active.env exists - keeping it"
 else
-  cat > /etc/radio-compute/fm.env <<'EOF'
-# FM station config (hand-tunable; matches the V1 active.env at cutover).
-FM_SOURCE=dx-r2
+  cat > /etc/sdr-streams/active.env <<'EOF'
+MODE=wbfm
 FREQ=99.3M
+SAMP=200000
 GAIN=30
 BITRATE=256k
-ANTENNA='Antenna A'
+MOUNT=fm.mp3
+ICECAST_PASS=${icecast_source_password}
 EOF
+  chown radio:radio /etc/sdr-streams/active.env
+  chmod 0600 /etc/sdr-streams/active.env
 fi
 
-if [ -f /opt/radio-compute/run-fm.sh ]; then
-  echo "    run-fm.sh exists - keeping it"
+if [ -f /etc/sdr-streams/tuner.env ]; then
+  echo "    tuner.env exists - keeping it"
 else
-  mkdir -p /opt/radio-compute
-  cat > /opt/radio-compute/run-fm.sh <<'EOF'
-#!/usr/bin/env bash
-# FM + RDS -> rack Icecast. V1-parity port of the Pi's stream.sh fm branch:
-# rx_fm demodulates the MPX at 250k (sdrplay decimates server-side, ~1 MB/s
-# on the wire); redsea decodes RDS from the same MPX; ffmpeg de-emphasizes,
-# lowpasses and encodes. Icecast creds arrive via the unit EnvironmentFile.
-set -euo pipefail
-. /etc/radio-compute/fm.env
-. "/etc/radio-compute/source-$FM_SOURCE.env"
-
-# RDS side-branch keeps only the latest group as JSON (no rds_watcher.py here
-# yet — the tuner UI integration is radio-repo v2 work).
-exec bash -c "rx_fm -d '$SOAPY_ARGS' -a '$ANTENNA' -M fm -l 0 -A std -s 250000 -g $GAIN -f $FREQ -F 9 - | \
-  tee >(redsea -r 250000 --output json 2>/dev/null | while IFS= read -r line; do printf '%s\n' \"\$line\" > /var/lib/radio-compute/rds-latest.json; done) | \
-  ffmpeg -hide_banner -loglevel warning -f s16le -ar 250000 -ac 1 -i - \
-         -af 'aemphasis=mode=reproduction:type=75fm,lowpass=15000' \
-         -ar 48000 -ac 1 \
-         -c:a libmp3lame -b:a $BITRATE -content_type audio/mpeg \
-         -f mp3 'icecast://source:$ICECAST_SOURCE_PASSWORD@$ICECAST_HOST:$ICECAST_PORT$FM_MOUNT'"
+  cat > /etc/sdr-streams/tuner.env <<'EOF'
+# Used by the sdr-tuner UI to rewrite active.env when you tune a station.
+ICECAST_PASS=${icecast_source_password}
 EOF
-  chmod +x /opt/radio-compute/run-fm.sh
+  chown radio:radio /etc/sdr-streams/tuner.env
+  chmod 0600 /etc/sdr-streams/tuner.env
 fi
 
-echo "==> systemd unit (laid down + reloaded; enable/start happens at the radio cutover)"
-cat > /etc/systemd/system/fm-stream.service <<'EOF'
+if [ -f /opt/sdr-tuner/stream.sh ]; then
+  echo "    stream.sh exists - keeping it"
+else
+  cat > /opt/sdr-tuner/stream.sh <<'EOF'
+#!/bin/bash
+# RACK variant of the Pi's V1 /opt/sdr-tuner/stream.sh (platform-staged).
+# Same active.env contract; FM/wbfm only. Samples come from the remote dx-R2
+# (registry-rendered SOAPY_ARGS); audio publishes to the rack Icecast.
+set -euo pipefail
+source /etc/sdr-streams/active.env
+source /etc/radio-compute/source-dx-r2.env
+
+ICECAST_URL="icecast://source:$ICECAST_PASS@${icecast_host}:${icecast_port}/$MOUNT"
+
+: > /run/sdr-streams/now_playing.json
+
+if [[ "$MODE" == "wbfm" || "$MODE" == "fm" ]]; then
+  exec bash -c "rx_fm -d '$SOAPY_ARGS' -a 'Antenna A' -M fm -l 0 -A std -s 250000 -g $GAIN -f $FREQ -F 9 - | \
+    tee >(redsea -r 250000 --output json 2>/dev/null | FREQ='$FREQ' /opt/sdr-tuner/rds_watcher.py) | \
+    ffmpeg -hide_banner -loglevel warning -f s16le -ar 250000 -ac 1 -i - \
+           -af 'aemphasis=mode=reproduction:type=75fm,lowpass=15000' \
+           -ar 48000 -ac 1 \
+           -c:a libmp3lame -b:a $BITRATE -content_type audio/mpeg \
+           -f mp3 '$ICECAST_URL'"
+else
+  echo "MODE=$MODE not supported on radio-compute yet (HD/AM are radio-repo v2 work)" >&2
+  exit 78
+fi
+EOF
+  chmod +x /opt/sdr-tuner/stream.sh
+  chown radio:radio /opt/sdr-tuner/stream.sh
+fi
+
+echo "==> sudoers: the tuner UI may control sdr-fm@active"
+cat > /etc/sudoers.d/radio-tuner <<'EOF'
+radio ALL=(root) NOPASSWD: /usr/bin/systemctl start sdr-fm@active, /usr/bin/systemctl stop sdr-fm@active, /usr/bin/systemctl restart sdr-fm@active
+EOF
+chmod 0440 /etc/sudoers.d/radio-tuner
+
+echo "==> systemd units (laid down + reloaded; enable/start is a manual switch step)"
+cat > /etc/systemd/system/sdr-fm@.service <<'EOF'
 [Unit]
-Description=FM + RDS stream: remote dx-R2 -> rack Icecast /fm.mp3
+Description=SDR FM stream %i (rack, remote dx-R2)
 After=network-online.target
 Wants=network-online.target
 
@@ -192,11 +227,49 @@ Wants=network-online.target
 Type=simple
 User=radio
 Group=radio
-WorkingDirectory=/var/lib/radio-compute
-EnvironmentFile=/etc/radio-compute/icecast.env
-ExecStart=/opt/radio-compute/run-fm.sh
+WorkingDirectory=/opt/sdr-tuner
+EnvironmentFile=/etc/sdr-streams/%i.env
+ExecStart=/opt/sdr-tuner/stream.sh
 Restart=always
-RestartSec=5s
+RestartSec=5
+RestartPreventExitStatus=78
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/sdr-tuner.service <<'EOF'
+[Unit]
+Description=SDR Tuner Web UI (Flask, rack)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=radio
+WorkingDirectory=/opt/sdr-tuner
+EnvironmentFile=/etc/sdr-streams/tuner.env
+ExecStart=/usr/bin/python3 /opt/sdr-tuner/app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/sdr-captions.service <<'EOF'
+[Unit]
+Description=SDR caption + lyrics orchestrator (rack)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=radio
+WorkingDirectory=/opt/sdr-tuner
+EnvironmentFile=/etc/sdr-streams/captions.env
+ExecStart=/usr/bin/python3 /opt/sdr-tuner/caption_orchestrator.py
+Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target

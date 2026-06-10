@@ -140,6 +140,55 @@ failed target block `-target` re-provisions of the others.
 4. `radio-compute` — mux/stereo/AM/SatDump against remote sources, per
    `MULTISTATION_STEREO_BUILD.md`.
 
+## RDS verdict + radio GUI move (2026-06-10, late): UI LIVE on the rack
+
+**RDS "issue" closed — no defect.** A/B proved it: the rack-built chain
+decodes KGMO 100.7 instantly and richly (PI 0x211E, full 0A/2A groups), and
+the Pi's own local rx_fm capture of 99.3 fails redsea identically. 99.3
+(KCGQ-FM) simply has weak/sparse RDS — V1's now_playing only ever held
+PI+PTY (`ps`/`rt` null), accumulated over hours. Same behavior now via
+rds_watcher on the rack.
+
+**Radio GUI moved (sdr-tuner Flask UI → radio-compute :8080).** The interim
+`fm-stream`/`fm.env` contract was REPLACED by the V1 sdr-streams contract so
+`app.py` runs unmodified:
+
+- Platform provisions: `/etc/sdr-streams/{active.env,tuner.env}` (seeded,
+  0600 radio), rack `/opt/sdr-tuner/stream.sh` (wbfm branch only; other modes
+  exit 78 = `RestartPreventExitStatus`, no flap loop), units
+  `sdr-fm@.service` / `sdr-tuner.service` / `sdr-captions.service`,
+  sudoers drop for radio→`systemctl ... sdr-fm@active`, tmpfiles for
+  `/run/sdr-streams`.
+- App code (app.py, station_db, ui_settings, rds_watcher,
+  caption_orchestrator, templates) deployed from the **radio repo checkout**
+  on codeserver (two-cadence; follow-up: give the radio repo a
+  deploy-to-rack target so its deploy.sh owns this). Station data
+  (fcc.json, stations*.json, overrides.json, ui.json) copied from the Pi;
+  `captions.env` copied with `ICECAST_URL` → rack.
+- `sdr-captions` now runs on .84 (reads the rack stream directly, Whisper at
+  gti-ai.srvr unchanged); the Pi's instance is disabled.
+- Verified: UI 200 on .84:8080, `/api/status` + `/api/now_playing` correct
+  (FCC lookup working), now_playing.json + captions.json being written,
+  public `/fm.mp3` 200 throughout.
+- **UI caveats:** Tune works for FM; HD/AM tunes stop the stream with a clear
+  unit failure (exit 78) until you retune FM — those modes are radio-repo v2
+  work. The UI's tune action writes BITRATE=128k (V1 behavior, app.py
+  hardcode). FM/AM scan buttons are no-ops (scan services not ported — they
+  would need exclusive device access anyway).
+- **Scanner GUI:** the rack scanner UI is op25's own console at
+  **192.168.6.83:8080** (talkgroup activity, tuning, plots). The Pi's
+  scanner-ui (:8081) still serves the old transcript archive but its live
+  EMS/monitor functions are dead post-offload. Scanner v2 app work replaces
+  it when the R2 lands.
+- **NPM suggestions (user-managed):** `radio.rg2.io` → 192.168.6.84:8080;
+  `scanner.rg2.io` (or repoint `ems.rg2.io`) → 192.168.6.83:8080.
+- **Ops gotcha — wedged dx-R2 source:** if clients flap with "Failed to open
+  sdr device" after device juggling, do the ordered bounce: stop client
+  (.84 `sdr-fm@active`) → on the Pi `systemctl stop sdr-source@dx-r2 &&
+  systemctl restart sdrplay && systemctl start sdr-source@dx-r2` → start the
+  client. Client units hit their start-limit while the device is missing —
+  `systemctl reset-failed` before starting.
+
 ## Radio domain cutover (2026-06-10, same day): FM LIVE on the rack
 
 The dx-R2 was handed from the Pi's V1 chain to the platform source server and

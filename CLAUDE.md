@@ -18,11 +18,13 @@ whole thing up.
 - **P25 LIVE on scanner-compute** (LXC **901**, .83): op25 on the interim
   `rtl-2838` device → rack `/ems.mp3`. Interim-dark:
   `/ems-{fire,police,interop}`, `/monitor.mp3`, EMS transcripts.
-- **FM LIVE on radio-compute** (LXC **902**, .84): `fm-stream.service` =
-  V1-parity rx_fm+redsea+ffmpeg chain on the remote dx-R2 → rack `/fm.mp3`
-  (retune: edit `/etc/radio-compute/fm.env` + restart). Interim-dead:
-  tuner-UI retune, HD (nrsc5 mode), AM. The stereo/multistation mux is the
-  radio repo's v2 project, targeting this LXC.
+- **FM + tuner UI LIVE on radio-compute** (LXC **902**, .84): V1 sdr-streams
+  contract (`/etc/sdr-streams/active.env` + `sdr-fm@active` running the rack
+  `stream.sh`, wbfm only — HD/AM exit 78 pending radio-repo v2). The sdr-tuner
+  Flask UI (:8080) and `sdr-captions` run here, app code deployed from the
+  radio repo checkout (its deploy.sh still targets the Pi — follow-up).
+  RDS: healthy chain (KGMO decodes richly); 99.3's RDS is just weak/sparse.
+  Scanner UI = op25 console on .83:8080.
 - **Distribution:** rack Icecast on LXC **900** (.82) sources BOTH mounts.
   `icecast.rg2.io` proxies to the **Pi's** Icecast, which carries on-demand
   relays for `/fm.mp3` + `/ems.mp3` (marked `platform-cutover` in
