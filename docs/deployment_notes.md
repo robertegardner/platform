@@ -284,7 +284,25 @@ rds_watcher on the rack.
   start op25-ems.
   The console has no audio player by design; listen at
   `https://icecast.rg2.io/ems.mp3`.
-- **FM audio chop — ROOT CAUSE LOCATED via UniFi controller (2026-06-10
+- **ROOT CAUSE REVISION (2026-06-11, user-driven): the Pi's switch port was
+  link-FLAPPING — 1502 flaps/24 h** (Pi kernel log; the user spotted the
+  disconnect storm in the UniFi timeline and challenged the bandwidth
+  theory — correctly: the uplink averaged 75 Mbps, nowhere near saturation).
+  Contributors, in order: the **switch port was set to forced-1G** (gigabit
+  requires autonegotiation; restricted advertisement vs the Pi's autoneg PHY
+  = chronic renegotiation) and **EEE enabled** on the Pi 5 NIC (known-bad
+  with multi-gig switch ports; disabling cut flaps 5×). Fix: EEE off
+  (persisted via `eth0-no-eee.service`) + port set to AUTO (user) →
+  **zero flaps since, including under load**. The microburst/shared-uplink
+  narrative below is RETRACTED as primary cause (kept for the record).
+  **V2 stress test on the healed link (iperf3 UDP Pi→.84, live streams
+  concurrent):** 64 Mbps 0.0004% loss · 102 Mbps 0.0005% · **256 Mbps
+  (full dx-R2 8 Msps CS16 target) 0.0032%** · 400 Mbps 0.18%. TCP 767 Mbps.
+  **The V2 radio unpause no longer requires the dedicated attic run** — the
+  existing link carries the full V2 load cleanly; re-verify with the real
+  capture-iq 8 Msps test at unpause. Watchdogs (fm/pi-fm/op25-watch) stay —
+  cheap insurance.
+- **FM audio chop — superseded by the above (2026-06-10
   late night): the attic flex uplink.** The Pi shares the "Attic Camera
   Flex 2.5G 8 PoE" with 8 cameras (~124 Mbps continuous) and an HDHomeRun
   (bursty UDP TV). The flex's uplink port 9 is **10GE media linked at only
