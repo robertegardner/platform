@@ -162,9 +162,19 @@ from `icecast.rg2.io`. Plan of record: `~/.claude/plans/snug-swimming-dusk.md`.
   `/var/lib/scanner-compute/call-events.jsonl` (deque 500, compacted at 1MB).
 - **Verified:** all 7 endpoints contract-exact by curl; live talkgroup flip +
   event accumulation observed; op25 web console unaffected (multi-client).
-- **NPM (user):** `ems.rg2.io` → 192.168.6.83:8081. **Never** to the Pi's
+- **NPM (user):** `ems.rg2.io` → 192.168.6.83:8081 — DONE 2026-06-11, both
+  proxies verified serving the contract. **Never** point ems at the Pi's
   old scheduler (its MOSWIN path runs `reset_dongle()` → yanks the RTL from
   the source server → wedges rack op25).
+- **NPM automation:** NPMplus exposes the standard NPM REST API on :81
+  (verified alive, v2.14.0). `tools/npm-proxy.py` does `list` and
+  `repoint <domain> <host> <port>` — creds via env (`NPM_IDENTITY`/
+  `NPM_SECRET`, e.g. in `~/.config/npm-proxy.env`, chmod 600, never
+  committed). Untested against live until creds are provided; use it to
+  script the radio-unpause repoint (`radio.rg2.io` → .84:8080).
+- **Scanner repo:** the v2 bridge lives in the EXISTING
+  `robertegardner/scanner` repo under `v2/` (pushed `c0cad02`; V1 history
+  preserved; CLAUDE.md there has the V2 section + V1-jobs warning).
 - **Backlog:** edge-recording in the bridge for tappable calls; aviation
   monitor/squelch with the R2; NPM basic auth on control POSTs once the app
   has a settings screen (it already sends an optional Authorization header).
