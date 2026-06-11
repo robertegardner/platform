@@ -175,6 +175,19 @@ from `icecast.rg2.io`. Plan of record: `~/.claude/plans/snug-swimming-dusk.md`.
 - **Scanner repo:** the v2 bridge lives in the EXISTING
   `robertegardner/scanner` repo under `v2/` (pushed `c0cad02`; V1 history
   preserved; CLAUDE.md there has the V2 section + V1-jobs warning).
+- **2026-06-11 audio-out fix (the first app tune broke /fm.mp3):**
+  `app.py write_env()` rewrites active.env on every tune → it dropped the
+  `ICECAST_HOST=192.168.6.82` line → stream.sh defaulted to localhost → the
+  Pi icecast **403'd the source** (a mount defined as a `<relay>` refuses
+  source publishes!) → watchdog restart-looped into the same wall. Fixes:
+  stream.sh default is now THE RACK (env still overrides; mirrored to the
+  radio repo, branch fix-fm-device-loss-selfheal), and the two legacy relay
+  blocks were removed from the Pi's icecast.xml (the documented post-NPM-
+  repoint cleanup; the Pi icecast now serves nothing and can be disabled at
+  leisure). Tune-survival verified via the public API. Also: scanner-api now
+  serves a friendly JSON index at `/` (ems.rg2.io root was a bare 404), and
+  scanner.rg2.io (op25 console) has NO audio player by design — scanner
+  listening is `icecast.rg2.io/ems.mp3` (the app does this itself).
 - **Backlog:** edge-recording in the bridge for tappable calls; aviation
   monitor/squelch with the R2; NPM basic auth on control POSTs once the app
   has a settings screen (it already sends an optional Authorization header).
