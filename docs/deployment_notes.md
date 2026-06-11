@@ -192,6 +192,30 @@ from `icecast.rg2.io`. Plan of record: `~/.claude/plans/snug-swimming-dusk.md`.
   monitor/squelch with the R2; NPM basic auth on control POSTs once the app
   has a settings screen (it already sends an optional Authorization header).
 
+## Incident (2026-06-11 ~04:00 UTC): SDRTrunk resurrection silenced /ems.mp3
+
+Symptom: captions scrolling on p25.rg2.io but the mount dead silent
+(mean=max=-91 dB). Diagnosis: op25's last voice decode was ~4 h stale while
+FRESH call-file captions (source "ems") kept landing — meaning **SDRTrunk
+was running again on the Pi**, having grabbed the dongle (a MOSWIN-switch
+click on the old UI in the window BEFORE the read-only defang deployed).
+The captions were real — produced by the wrong decoder; op25 sat in
+sync-search the whole time. Lesson: caption flow ≠ V2 audio flow; check
+`source` ("ems" = call files, "monitor" = live stream) and op25's voice-
+update freshness.
+
+Recovery + permanent guard:
+- Killed the orphaned SDRTrunk (it survives a scheduler stop — own session;
+  `pkill -f io.github.dsheirer`), usbreset, source restart, op25 restart —
+  decode + audio verified back within seconds.
+- **`scanner-scheduler` is now disabled on the Pi permanently.** Nothing
+  needs it anymore (UI readonly→bridge, transcribe ALWAYS mode) and it was
+  the last path to a dongle grab. Cost: the V1 UI's /recordings page (and
+  scheduler-backed /calls history) go empty — old files remain on disk and
+  /transcript still works. Rollback: `systemctl enable --now
+  scanner-scheduler` (only ever with SCANNER_UI_READONLY unset and op25
+  stopped).
+
 ## RDS verdict + radio GUI move (2026-06-10, late): UI LIVE on the rack
 
 **RDS "issue" closed — no defect.** A/B proved it: the rack-built chain
