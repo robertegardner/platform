@@ -317,7 +317,54 @@ RestartSec=5s
 WantedBy=multi-user.target
 EOF
 
+# Decode-starvation watchdog: SoapyRemote flow-control loss (the shared attic
+# uplink) can silently starve op25 — the unit stays active and the mount stays
+# up (mksafe silence) while TSBKs stop. The bridge already detects staleness
+# (current:null after 30s without trunk_updates); two consecutive stale checks
+# restart op25-ems (a fresh session re-opens flow control).
+cat > /opt/scanner-compute/op25-watch.sh <<'EOF'
+#!/usr/bin/env bash
+# platform-managed — do not hand-edit; terraform re-apply rewrites.
+set -u
+STRIKES=/run/op25-watch.strikes
+systemctl is-active --quiet op25-ems || { rm -f "$STRIKES"; exit 0; }
+cur=$(curl -s -m 5 http://127.0.0.1:8081/api/status | python3 -c 'import json,sys; print(json.load(sys.stdin)["current"] is not None)' 2>/dev/null)
+if [ "$cur" = "True" ]; then rm -f "$STRIKES"; exit 0; fi
+n=$(($(cat "$STRIKES" 2>/dev/null || echo 0) + 1))
+if [ "$n" -ge 2 ]; then
+  echo "op25-watch: decode stale twice - restarting op25-ems"
+  rm -f "$STRIKES"
+  systemctl restart op25-ems
+else
+  echo "$n" > "$STRIKES"
+fi
+EOF
+chmod +x /opt/scanner-compute/op25-watch.sh
+
+cat > /etc/systemd/system/op25-watch.service <<'EOF'
+[Unit]
+Description=op25 decode watchdog (restart on silent starvation)
+
+[Service]
+Type=oneshot
+ExecStart=/opt/scanner-compute/op25-watch.sh
+EOF
+
+cat > /etc/systemd/system/op25-watch.timer <<'EOF'
+[Unit]
+Description=Run the op25 decode watchdog every minute
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
+systemctl enable op25-watch.timer >/dev/null 2>&1 || true
+systemctl start op25-watch.timer || true
 
 echo "==> provisioning complete (units laid down, not started — cutover enables them)"
 %{ for id, dev in devices ~}
