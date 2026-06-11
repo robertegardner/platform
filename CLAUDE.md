@@ -223,3 +223,10 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   app's scanner backend; deployed from the scanner repo). NEVER point it at
   the Pi's old scheduler — its MOSWIN job USB-resets the dongle out from
   under sdr-source@rtl-2838.
+- `p25.rg2.io` → radio.srvr:8081 (the V1 scanner UI in READ-ONLY mode:
+  /listen plays the live op25 feed with captions + the V1 archive pages.
+  `SCANNER_UI_READONLY=true` makes it proxy the .83 bridge — it cannot
+  reach the old scheduler. Created via tools/npm-proxy.py; note NPMplus
+  cert API quirk: POST /api/nginx/certificates takes NO meta keys, and a
+  cloned host serves the SOURCE's cert — issue a per-domain cert and PUT
+  certificate_id after cloning.)
