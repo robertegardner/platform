@@ -30,24 +30,32 @@ CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
 
-def api(path, method="GET", body=None, token=None):
+def api(path, method="GET", body=None, cookie=None, want_cookie=False):
     req = urllib.request.Request(
         NPM_URL + path,
         data=json.dumps(body).encode() if body is not None else None,
         method=method,
         headers={"Content-Type": "application/json",
-                 **({"Authorization": f"Bearer {token}"} if token else {})},
+                 **({"Cookie": cookie} if cookie else {})},
     )
     with urllib.request.urlopen(req, timeout=10, context=CTX) as resp:
+        if want_cookie:
+            return resp.getheader("Set-Cookie")
         return json.loads(resp.read().decode() or "null")
 
 
 def get_token():
+    """NPMplus (unlike upstream NPM) returns the JWT as an HttpOnly cookie
+    (__Host-Http-token), not in the response body — replay the cookie."""
     ident, secret = os.environ.get("NPM_IDENTITY"), os.environ.get("NPM_SECRET")
     if not ident or not secret:
         sys.exit("set NPM_IDENTITY and NPM_SECRET in the environment "
                  "(see header; keep them in ~/.config/npm-proxy.env)")
-    return api("/api/tokens", "POST", {"identity": ident, "secret": secret})["token"]
+    set_cookie = api("/api/tokens", "POST",
+                     {"identity": ident, "secret": secret}, want_cookie=True)
+    if not set_cookie or "token=" not in set_cookie:
+        sys.exit("login succeeded but no token cookie returned — API change?")
+    return set_cookie.split(";", 1)[0]  # "__Host-Http-token=..."
 
 
 # Fields the PUT endpoint accepts back (strip ids/timestamps/computed).
@@ -65,7 +73,7 @@ def main():
     if not args or args[0] not in ("list", "repoint"):
         sys.exit(__doc__)
     token = get_token()
-    hosts = api("/api/nginx/proxy-hosts", token=token)
+    hosts = api("/api/nginx/proxy-hosts", cookie=token)
 
     if args[0] == "list":
         for h in hosts:
@@ -82,7 +90,7 @@ def main():
     old = f"{h['forward_host']}:{h['forward_port']}"
     payload = {k: h[k] for k in EDITABLE if k in h}
     payload["forward_host"], payload["forward_port"] = fhost, fport
-    api(f"/api/nginx/proxy-hosts/{h['id']}", "PUT", payload, token=token)
+    api(f"/api/nginx/proxy-hosts/{h['id']}", "PUT", payload, cookie=token)
     print(f"{domain}: {old} -> {fhost}:{fport}")
 
 
