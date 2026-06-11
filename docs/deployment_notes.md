@@ -192,6 +192,40 @@ from `icecast.rg2.io`. Plan of record: `~/.claude/plans/snug-swimming-dusk.md`.
   monitor/squelch with the R2; NPM basic auth on control POSTs once the app
   has a settings screen (it already sends an optional Authorization header).
 
+## V2 radio RE-ROLLOUT runbook (planned 2026-06-11 morning, link healed)
+
+GATE: overnight flap count on the Pi's eth0 = 0 (monitor armed; forced-1G +
+EEE root cause fixed 2026-06-11 ~00:00). Abort and revisit if any flaps.
+
+1. Pre-flight: flaps=0; iperf3 UDP 256M Pi→.84 30 s spot check (<0.01% loss);
+   all services green (sdr-fm@active on Pi, op25 chain on .83, icecast .82).
+2. Pi: `systemctl stop sdr-fm@active && systemctl disable sdr-fm@active &&
+   systemctl mask sdr-fm@active`; `systemctl enable --now sdr-source@dx-r2`.
+   Disable `pi-fm-watch.timer` (publishing leaves the Pi).
+3. VALIDATION GATE (the real test the iperf proxy stood in for): capture-iq
+   from .84 — 2 Msps 120 s AND 8 Msps 120 s against :55001 — expect ~full
+   effective rate, 0 timeouts. FAIL → rollback (step R) and stop.
+4. .84: `systemctl enable --now sdr-fm@active sdr-tuner sdr-captions
+   fm-watch.timer` (active.env persists from the GUI-move era; the rack
+   stream.sh publish host is templated to .82 — tune-proof, app.py's
+   write_env can't break it).
+5. Pi: `systemctl disable --now sdr-captions` (captions move back to .84).
+6. Verify: rack /fm.mp3 200 + clean volumedetect; public 200; tune cycle via
+   /api/tune (99.3 ↔ 100.7) with audio check each; RDS now_playing.json
+   updating on .84; 15-min soak (mount 200 + zero readStream errors).
+7. NPM: `tools/npm-proxy.py repoint radio.rg2.io 192.168.6.84 8080`.
+8. Docs/CLAUDE.md state flip + commit + memory.
+
+KNOWN LIMITATION (unchanged): an AM/HD tune from the UI stops the rack
+stream (stream.sh exit 78, RestartPreventExitStatus) until an FM retune —
+fm-watch does not restart a deliberately-stopped unit.
+
+ROLLBACK (R): .84 `systemctl disable --now sdr-fm@active sdr-tuner
+sdr-captions fm-watch.timer`; Pi `systemctl disable --now sdr-source@dx-r2;
+systemctl unmask sdr-fm@active; systemctl enable sdr-fm@active; systemctl
+start sdr-fm@active; systemctl enable --now sdr-captions pi-fm-watch.timer`;
+NPM repoint radio.rg2.io back to radio.srvr:8080 if step 7 already ran.
+
 ## Incident (2026-06-11 ~04:00 UTC): SDRTrunk resurrection silenced /ems.mp3
 
 Symptom: captions scrolling on p25.rg2.io but the mount dead silent
