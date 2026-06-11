@@ -8,6 +8,8 @@ a short-lived JWT; proxy hosts are CRUD at /api/nginx/proxy-hosts.
 Usage:
   npm-proxy.py list
   npm-proxy.py repoint <domain> <forward_host> <forward_port>
+  npm-proxy.py clone <src-domain> <new-domain> <forward_host> <forward_port>
+                     (new host copying the source's cert/SSL/websocket settings)
 
 Credentials come from the environment (never commit them):
   NPM_URL       default https://192.168.6.49:81
@@ -70,10 +72,25 @@ EDITABLE = [
 
 def main():
     args = sys.argv[1:]
-    if not args or args[0] not in ("list", "repoint"):
+    if not args or args[0] not in ("list", "repoint", "clone"):
         sys.exit(__doc__)
     token = get_token()
     hosts = api("/api/nginx/proxy-hosts", cookie=token)
+
+    if args[0] == "clone":
+        src_domain, new_domain, fhost, fport = args[1], args[2], args[3], int(args[4])
+        matches = [h for h in hosts if src_domain in h["domain_names"]]
+        if len(matches) != 1:
+            sys.exit(f"{len(matches)} proxy hosts match {src_domain!r} — refusing")
+        if any(new_domain in h["domain_names"] for h in hosts):
+            sys.exit(f"{new_domain} already exists — use repoint")
+        payload = {k: matches[0][k] for k in EDITABLE if k in matches[0]}
+        payload["domain_names"] = [new_domain]
+        payload["forward_host"], payload["forward_port"] = fhost, fport
+        created = api("/api/nginx/proxy-hosts", "POST", payload, cookie=token)
+        print(f"created #{created.get('id')}: {new_domain} -> {fhost}:{fport} "
+              f"(settings cloned from {src_domain})")
+        return
 
     if args[0] == "list":
         for h in hosts:
