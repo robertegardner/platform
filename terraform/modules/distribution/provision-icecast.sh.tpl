@@ -140,5 +140,44 @@ systemctl daemon-reload
 systemctl enable fm-duck
 systemctl restart fm-duck
 
+echo "==> icy-pusher: now-playing -> ICY StreamTitle on the audio mounts"
+# Network streamers (WiiM) display ICY metadata natively; pushed via the
+# Icecast admin metadata endpoint from the backend's /api/now_playing.
+install -d -m 0755 /opt/icy-pusher
+# icy_pusher.py is pushed to /tmp by a Terraform file provisioner (see main.tf).
+install -m 0755 /tmp/icy_pusher.py /opt/icy-pusher/icy_pusher.py && rm -f /tmp/icy_pusher.py
+
+cat > /etc/icy-pusher.env <<'EOF'
+NOW_PLAYING_URL=https://radio.rg2.io/api/now_playing
+ICECAST_ADMIN=http://127.0.0.1:8000
+ADMIN_USER=admin
+ADMIN_PASS=${admin_password}
+MOUNTS=/fm.mp3 /fm-duck.mp3
+EOF
+chmod 600 /etc/icy-pusher.env
+
+cat > /etc/systemd/system/icy-pusher.service <<'EOF'
+[Unit]
+Description=Now-playing -> Icecast ICY StreamTitle metadata (WiiM display)
+After=network-online.target icecast2.service
+Wants=icecast2.service
+
+[Service]
+# EnvironmentFile is root-only (Icecast admin password) — systemd reads it
+# before dropping to User=.
+EnvironmentFile=/etc/icy-pusher.env
+ExecStart=/usr/bin/python3 /opt/icy-pusher/icy_pusher.py
+User=icecast2
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable icy-pusher
+systemctl restart icy-pusher
+
 echo "==> provisioning complete"
 curl -sS -m 5 http://localhost:8000/status-json.xsl >/dev/null && echo "    status endpoint OK"

@@ -80,8 +80,9 @@ resource "null_resource" "provision" {
 
   triggers = {
     container_id   = proxmox_virtual_environment_container.distribution.vm_id
-    provision_hash = sha256(local.provision_script)
-    fm_duck_hash   = filesha256("${path.module}/fm_duck.py")
+    provision_hash  = sha256(local.provision_script)
+    fm_duck_hash    = filesha256("${path.module}/fm_duck.py")
+    icy_pusher_hash = filesha256("${path.module}/icy_pusher.py")
   }
 
   connection {
@@ -107,6 +108,12 @@ resource "null_resource" "provision" {
   provisioner "file" {
     source      = "${path.module}/fm_duck.py"
     destination = "/tmp/fm_duck.py"
+  }
+
+  # icy-pusher daemon (now-playing -> ICY StreamTitle for network streamers).
+  provisioner "file" {
+    source      = "${path.module}/icy_pusher.py"
+    destination = "/tmp/icy_pusher.py"
   }
 
   # Single && chain so a failing script can't be masked by the rm -f exiting 0

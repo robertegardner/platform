@@ -40,6 +40,12 @@ item 4) escalated from flapping to hard failure during peak attic heat:
   module (fm_duck.py + unit + root-only env w/ source password); the
   provisioner now restarts icecast2 ONLY on fresh config (re-provisions no
   longer drop listeners/the Pi publisher). Registry: /fm-duck.mp3 added.
+- **icy-pusher shipped (distribution, .82):** now-playing -> ICY StreamTitle
+  on /fm.mp3 + /fm-duck.mp3 (polls https://radio.rg2.io/api/now_playing —
+  follows the backend across the V2 unpause — and pushes the Icecast admin
+  metadata endpoint on change, per-mount latched so a reconnecting mount
+  catches up next poll). WiiM and other network streamers now display
+  Artist - Title natively; ICY-ignoring clients unaffected.
 
 ## 2026-06-10 — DAY SUMMARY (for the next session)
 
