@@ -17,6 +17,15 @@ re-rollout ON HOLD** pending physical fixes (below); scanner V2 stays live
    the cool night (23:57→06:07), flaps resumed and accelerated with morning
    attic heat (06:07, 06:26, 06:36…). Same 3 s down/up signature. Strongly
    indicates the cable run / connectors. → attic visit (see README TODO).
+5. **2026-06-12 ~14:40 CDT — #4 ESCALATED TO HARD FAILURE** (peak afternoon
+   heat): link died outright with the PHY wedged — UniFi showed the port
+   with no ethernet client but **10 W PoE draw**; the Pi ran on, blind
+   (`stream.sh: Network is unreachable`), both public streams silent. PoE
+   power-cycle → boot-time 3–7 s flap burst (~1 min) → ~60 s stable → dead
+   again, then bouncing. The medium now fails hard, not just flaps —
+   **the dedicated attic run is required for V1 reliability, not just V2**.
+   Interim triage order: different switch port → reseat connectors → force
+   100FDX (2-pair stopgap; V1-hybrid + scanner CU8 traffic fits in 100M).
 
 ## V2 re-rollout gates (re-run after the physical fixes)
 

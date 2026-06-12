@@ -4,6 +4,28 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-12 (afternoon) — Attic link DIED outright (escalation of the flap saga)
+
+**State: Pi OFFLINE/bouncing pending physical fix. Both public streams were
+silent ~14:40 CDT.** The thermally-marginal link (network_health.md root-cause
+item 4) escalated from flapping to hard failure during peak attic heat:
+
+- Symptom: web player "playing" but silent; Android stream dead. Cause:
+  `/fm.mp3` source lost on the rack (Pi stream.sh: "Network is unreachable");
+  Pi unreachable. UniFi showed the port with **no ethernet client but 10 W
+  PoE draw** — wedged PHY, Pi still powered/running blind.
+- PoE power-cycle (user) → reboot → 3–7 s link flap burst for ~1 min
+  (`macb eth0: Link is Down/Up - 1Gbps/Full`) → ~60 s stable → **dead again**,
+  then bouncing (pingable in bursts, SSH times out).
+- Next actions (physical, in order): try a DIFFERENT port on the attic switch
+  (isolates port vs cable vs Pi PHY/HAT); reseat both cable ends; stopgap =
+  force the port to **100FDX** (2-pair — marginal-at-gigabit cables often run
+  clean; V1-hybrid traffic incl. the scanner CU8 ~38 Mbps fits).
+- Verdict: the **dedicated attic ethernet run is now required for V1
+  reliability**, not just the V2 unpause.
+- Same day, unrelated: Butterchurn visualizer shipped in radio.html (radio
+  repo), native projectM MILKDROP + duck-on-talk shipped in radio-android.
+
 ## 2026-06-10 — DAY SUMMARY (for the next session)
 
 One very long day: compute tier built and both domains cut over → GUIs moved
