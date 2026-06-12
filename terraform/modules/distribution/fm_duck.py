@@ -33,7 +33,11 @@ SHORT_FRAMES = 60               # ~2.8 s short window (recovery decision)
 MIN_FRAMES = 80                 # ~3.7 s before the first verdict
 EVAL_EVERY = 8                  # re-score ~2.7x/s
 W_BEAT, W_HF, W_STEADY = 0.50, 0.30, 0.20
-HF_FULL, CV_FULL = 0.12, 0.60
+# HF/CV scales are SERVER-calibrated against linear-PCM rfft magnitudes —
+# the client constants (8-bit / dB-mapped FFTs) do not transfer. Probe data
+# 2026-06-12 on live FM music: beat~0.52, hf_ratio~0.22, cv~0.39; speech is
+# expected well below/above respectively. (/tmp/duck_probe.py on this LXC.)
+HF_FULL, CV_FULL = 0.20, 1.20
 MUSIC_TH, TALK_TH = 0.55, 0.35  # talk low: quiet sparse verses must not duck
 MUSIC_HOLD_MS, TALK_HOLD_MS = 1500, 8000
 DUCK_VOL = 0.07
@@ -53,6 +57,7 @@ class Classifier:
         self.bass, self.mid, self.high = [], [], []
         self.state = "music"
         self.score = 0.0
+        self.parts = (0.0, 0.0, 0.0)  # (beat, hf_ratio, cv) of the last long eval
         self.frames = 0
         self.music_run = 0.0
         self.talk_run = 0.0
@@ -83,6 +88,8 @@ class Classifier:
         cv = float(m.std() / mean_mid) if mean_mid > 1e-9 else 1.0
         steady = min(1.0, max(0.0, 1.0 - cv / CV_FULL))
 
+        if start == 0:  # keep long-window components for the heartbeat log
+            self.parts = (beat, hf_ratio, cv)
         return min(1.0, max(0.0, W_BEAT * beat + W_HF * hf_score + W_STEADY * steady))
 
     def add(self, mags):
@@ -168,7 +175,11 @@ def main():
             now = time.monotonic()
             if now - last_beat > 60:
                 last_beat = now
-                print("fm-duck: alive — %s, score %.2f, gain %.2f" % (cls.state, cls.score, gain), flush=True)
+                print(
+                    "fm-duck: alive — %s, score %.2f (beat %.2f hf %.3f cv %.2f), gain %.2f"
+                    % (cls.state, cls.score, *cls.parts, gain),
+                    flush=True,
+                )
     except BrokenPipeError:
         print("fm-duck: encoder/icecast pipe broke — exiting for restart", flush=True)
     finally:
