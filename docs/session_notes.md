@@ -23,6 +23,14 @@ item 4) escalated from flapping to hard failure during peak attic heat:
   clean; V1-hybrid traffic incl. the scanner CU8 ~38 Mbps fits).
 - Verdict: the **dedicated attic ethernet run is now required for V1
   reliability**, not just the V2 unpause.
+- **RESOLUTION (interim, ~15:15 CDT): port forced to 100FDX (user)** → link
+  immediately held (3+ min continuous, vs seconds at 1G) — confirms the
+  marginal-at-gigabit medium. One leftover: a flap had killed ffmpeg's TCP
+  to the rack mid-publish ("Connection reset by peer") leaving
+  `sdr-fm@active` active-but-publisher-dead; **`pi-fm-watch` caught it**
+  (~2 min detection) and restarted the unit; both mounts back, /fm.mp3 200.
+  Leave the port at 100FDX until the dedicated run exists. Re-check the
+  flap gate over a warm-afternoon window before trusting it.
 - Same day, unrelated: Butterchurn visualizer shipped in radio.html (radio
   repo), native projectM MILKDROP + duck-on-talk shipped in radio-android.
 
