@@ -32,7 +32,7 @@ POLL_S = float(os.environ.get("POLL_S", "3"))
 # the last song would otherwise linger on the WiiM display through the duck.
 DUCK_STATE_FILE = os.environ.get("DUCK_STATE_FILE", "/run/fm-duck/state")
 DUCK_MOUNTS = set(os.environ.get("DUCK_MOUNTS", "/fm-duck.mp3").split())
-TALK_MARKER = os.environ.get("TALK_MARKER", "— commercials / talk (ducked) —")
+TALK_SUFFIX = os.environ.get("TALK_SUFFIX", "at commercial")
 STATE_MAX_AGE_S = 180  # stale state file (fm-duck down) counts as music
 
 
@@ -45,6 +45,16 @@ def duck_is_talking():
             return f.read().startswith("talk")
     except OSError:
         return False
+
+
+def station_line(np):
+    """Station identity: FCC call sign + freq, RDS PS fallback."""
+    call = ((np.get("fcc") or {}).get("call") or "").strip()
+    freq = (np.get("freq") or "").strip()
+    if call:
+        return "%s %s" % (call, freq) if freq else call
+    ps = ((np.get("rds") or {}).get("ps") or "").strip()
+    return ps or "FM Radio"
 
 
 def song_line(np):
@@ -60,14 +70,7 @@ def song_line(np):
             a = (rds.get("artist") or "").strip()
             t = (rds.get("title") or "").strip()
             return " - ".join(x for x in (a, t) if x)
-    ps = (rds.get("ps") or "").strip()
-    if ps:
-        return ps
-    call = ((np.get("fcc") or {}).get("call") or "").strip()
-    freq = (np.get("freq") or "").strip()
-    if call:
-        return "%s %s" % (call, freq) if freq else call
-    return "FM Radio"
+    return station_line(np)
 
 
 def push(mount, song):
@@ -104,13 +107,16 @@ def main():
             with urllib.request.urlopen(NOW_PLAYING_URL, timeout=5) as r:
                 np = json.load(r)
             song = song_line(np)
+            # Ducked mounts show the station instead of the (stale) song —
+            # e.g. "KGMO 100.7 at commercial".
+            marker = "%s %s" % (station_line(np), TALK_SUFFIX)
             talking = duck_is_talking()
             ok = []
             for m in MOUNTS:
-                desired = TALK_MARKER if (talking and m in DUCK_MOUNTS) else song
+                desired = marker if (talking and m in DUCK_MOUNTS) else song
                 if last[m] != desired and push(m, desired):
                     last[m] = desired
-                    ok.append("%s(%s)" % (m, "marker" if desired is TALK_MARKER else "title"))
+                    ok.append("%s(%s)" % (m, "marker" if desired == marker and talking else "title"))
             if ok:
                 print('icy-pusher: "%s" -> %s' % (song, ", ".join(ok)), flush=True)
         except (OSError, ValueError) as e:
