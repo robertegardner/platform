@@ -113,6 +113,7 @@ install -m 0755 /tmp/fm_duck.py /opt/fm-duck/fm_duck.py && rm -f /tmp/fm_duck.py
 cat > /etc/fm-duck.env <<'EOF'
 SOURCE_URL=http://127.0.0.1:8000/fm.mp3
 MOUNT_URL=icecast://source:${source_password}@127.0.0.1:8000/fm-duck.mp3
+STATE_FILE=/run/fm-duck/state
 EOF
 chmod 600 /etc/fm-duck.env
 
@@ -129,6 +130,8 @@ Wants=icecast2.service
 EnvironmentFile=/etc/fm-duck.env
 ExecStart=/usr/bin/python3 /opt/fm-duck/fm_duck.py
 User=icecast2
+# /run/fm-duck/state — duck state published for icy-pusher's talk marker.
+RuntimeDirectory=fm-duck
 Restart=always
 RestartSec=3
 
@@ -153,6 +156,8 @@ ICECAST_ADMIN=http://127.0.0.1:8000
 ADMIN_USER=admin
 ADMIN_PASS=${admin_password}
 MOUNTS=/fm.mp3 /fm-duck.mp3
+DUCK_STATE_FILE=/run/fm-duck/state
+DUCK_MOUNTS=/fm-duck.mp3
 EOF
 chmod 600 /etc/icy-pusher.env
 

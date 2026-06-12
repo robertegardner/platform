@@ -15,6 +15,11 @@ same as any direct listener.
 
 Config via environment (systemd EnvironmentFile=/etc/fm-duck.env, root-only —
 it carries the Icecast source password inside MOUNT_URL).
+
+Publishes its state ("talk"/"music") to STATE_FILE (default
+/run/fm-duck/state, via the unit's RuntimeDirectory) so icy-pusher can swap
+the duck mount's StreamTitle for a marker while ducked. Rewritten on every
+heartbeat too — consumers treat a stale file (>180 s) as music.
 """
 
 import os
@@ -127,6 +132,17 @@ class Classifier:
         return self.state != prev
 
 
+STATE_FILE = os.environ.get("STATE_FILE", "/run/fm-duck/state")
+
+
+def write_state(state, score):
+    try:
+        with open(STATE_FILE, "w") as f:
+            f.write("%s %.2f\n" % (state, score))
+    except OSError:
+        pass  # /run dir missing (manual run) — marker feature just stays off
+
+
 def main():
     source_url = os.environ["SOURCE_URL"]
     mount_url = os.environ["MOUNT_URL"]
@@ -149,6 +165,7 @@ def main():
     window = np.hanning(HOP).astype(np.float32)
     gain = 1.0
     last_beat = time.monotonic()
+    write_state(cls.state, cls.score)
     print("fm-duck: relaying %s -> /fm-duck.mp3" % source_url, flush=True)
 
     try:
@@ -160,6 +177,7 @@ def main():
 
             x = np.frombuffer(buf, dtype=np.float32)
             if cls.add(np.abs(np.fft.rfft(x * window))):
+                write_state(cls.state, cls.score)
                 print("fm-duck: %s (score %.2f)" % (cls.state, cls.score), flush=True)
 
             target = DUCK_VOL if cls.state == "talk" else 1.0
@@ -175,6 +193,7 @@ def main():
             now = time.monotonic()
             if now - last_beat > 60:
                 last_beat = now
+                write_state(cls.state, cls.score)
                 print(
                     "fm-duck: alive — %s, score %.2f (beat %.2f hf %.3f cv %.2f), gain %.2f"
                     % (cls.state, cls.score, *cls.parts, gain),

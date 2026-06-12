@@ -27,6 +27,25 @@ ADMIN_PASS = os.environ["ADMIN_PASS"]
 MOUNTS = os.environ.get("MOUNTS", "/fm.mp3 /fm-duck.mp3").split()
 POLL_S = float(os.environ.get("POLL_S", "3"))
 
+# While fm-duck reports "talk", the ducked mounts get a marker instead of the
+# (stale) song title — the now-playing pipeline can't identify commercials, so
+# the last song would otherwise linger on the WiiM display through the duck.
+DUCK_STATE_FILE = os.environ.get("DUCK_STATE_FILE", "/run/fm-duck/state")
+DUCK_MOUNTS = set(os.environ.get("DUCK_MOUNTS", "/fm-duck.mp3").split())
+TALK_MARKER = os.environ.get("TALK_MARKER", "— commercials / talk (ducked) —")
+STATE_MAX_AGE_S = 180  # stale state file (fm-duck down) counts as music
+
+
+def duck_is_talking():
+    try:
+        st = os.stat(DUCK_STATE_FILE)
+        if time.time() - st.st_mtime > STATE_MAX_AGE_S:
+            return False
+        with open(DUCK_STATE_FILE) as f:
+            return f.read().startswith("talk")
+    except OSError:
+        return False
+
 
 def song_line(np):
     """Best 'now playing' line from the now_playing payload."""
@@ -85,9 +104,13 @@ def main():
             with urllib.request.urlopen(NOW_PLAYING_URL, timeout=5) as r:
                 np = json.load(r)
             song = song_line(np)
-            ok = [m for m in MOUNTS if last[m] != song and push(m, song)]
-            for m in ok:
-                last[m] = song
+            talking = duck_is_talking()
+            ok = []
+            for m in MOUNTS:
+                desired = TALK_MARKER if (talking and m in DUCK_MOUNTS) else song
+                if last[m] != desired and push(m, desired):
+                    last[m] = desired
+                    ok.append("%s(%s)" % (m, "marker" if desired is TALK_MARKER else "title"))
             if ok:
                 print('icy-pusher: "%s" -> %s' % (song, ", ".join(ok)), flush=True)
         except (OSError, ValueError) as e:

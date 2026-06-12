@@ -45,7 +45,11 @@ item 4) escalated from flapping to hard failure during peak attic heat:
   follows the backend across the V2 unpause — and pushes the Icecast admin
   metadata endpoint on change, per-mount latched so a reconnecting mount
   catches up next poll). WiiM and other network streamers now display
-  Artist - Title natively; ICY-ignoring clients unaffected.
+  Artist - Title natively; ICY-ignoring clients unaffected. Follow-up:
+  while fm-duck reports talk, the duck mount's StreamTitle becomes a
+  "— commercials / talk (ducked) —" marker (fm-duck publishes state to
+  /run/fm-duck/state via RuntimeDirectory; stale >180 s = music; verified
+  by faking the state file — marker push + title restore both observed).
 
 ## 2026-06-10 — DAY SUMMARY (for the next session)
 
