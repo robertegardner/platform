@@ -28,15 +28,48 @@
     "/scanner-atc.mp3": {
       "domain": "scanner",
       "source": "ATC audio (when the R2 is on ATC)"
+    },
+    "/fm-duck.mp3": {
+      "domain": "radio",
+      "source": "server-side talk-ducked relay of /fm.mp3 (fm-duck.service on distribution) — for GUI-less streamers (WiiM); duck by URL choice"
     }
   },
   "legacy_v1_mounts": {
     "_comment": "V1 mounts and their migration state. 2026-06-10 scanner cutover: /ems.mp3 is RACK-SOURCED (op25 on scanner-compute -> rack Icecast; the Pi Icecast carries an on-demand relay so the public URL keeps working until the NPMplus repoint). The category sub-mounts and monitor are DARK in the interim — the single op25 stream carries all talkgroups (as V1's /ems.mp3 did); per-category splits and the monitor/manual-tune path return as scanner v2 app work once the Airspy R2 lands.",
-    "/fm.mp3": { "domain": "radio", "source": "rx_fm+redsea V1-parity chain (256k, radio-compute, remote dx-R2)", "migrated": "2026-06-10" },
-    "/ems.mp3": { "domain": "scanner", "source": "op25 MOSWIN All (32k, scanner-compute)", "migrated": "2026-06-10" },
-    "/ems-fire.mp3": { "domain": "scanner", "source": "SDRTrunk MOSWIN Fire (retired)", "status": "dark-interim" },
-    "/ems-police.mp3": { "domain": "scanner", "source": "SDRTrunk MOSWIN Police (retired)", "status": "dark-interim" },
-    "/ems-interop.mp3": { "domain": "scanner", "source": "SDRTrunk MOSWIN Interop (retired)", "status": "dark-interim" },
-    "/monitor.mp3": { "domain": "scanner", "source": "scanner-transcribe monitor loop (needs the dongle the remote source now owns)", "status": "dark-interim" }
+    "/fm.mp3": {
+      "domain": "radio",
+      "source": "rx_fm+redsea V1-parity chain (256k, radio-compute, remote dx-R2)",
+      "migrated": "2026-06-10"
+    },
+    "/ems.mp3": {
+      "domain": "scanner",
+      "source": "op25 MOSWIN All (32k, scanner-compute)",
+      "migrated": "2026-06-10"
+    },
+    "/ems-fire.mp3": {
+      "domain": "scanner",
+      "source": "SDRTrunk MOSWIN Fire (retired)",
+      "status": "dark-interim"
+    },
+    "/ems-police.mp3": {
+      "domain": "scanner",
+      "source": "SDRTrunk MOSWIN Police (retired)",
+      "status": "dark-interim"
+    },
+    "/ems-interop.mp3": {
+      "domain": "scanner",
+      "source": "SDRTrunk MOSWIN Interop (retired)",
+      "status": "dark-interim"
+    },
+    "/monitor.mp3": {
+      "domain": "scanner",
+      "source": "scanner-transcribe monitor loop (needs the dongle the remote source now owns)",
+      "status": "dark-interim"
+    },
+    "/fm-duck.mp3": {
+      "domain": "radio",
+      "source": "fm-duck.service relay (distribution LXC), live under V1-hybrid",
+      "migrated": "2026-06-12"
+    }
   }
 }

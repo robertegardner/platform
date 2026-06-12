@@ -81,6 +81,7 @@ resource "null_resource" "provision" {
   triggers = {
     container_id   = proxmox_virtual_environment_container.distribution.vm_id
     provision_hash = sha256(local.provision_script)
+    fm_duck_hash   = filesha256("${path.module}/fm_duck.py")
   }
 
   connection {
@@ -98,6 +99,14 @@ resource "null_resource" "provision" {
   provisioner "file" {
     content     = local.provision_script
     destination = "/tmp/provision-icecast.sh"
+  }
+
+  # The fm-duck daemon (talk-ducked /fm-duck.mp3 relay). Pushed as a plain
+  # file — no template vars in it; the secret rides in /etc/fm-duck.env,
+  # written by the provision script.
+  provisioner "file" {
+    source      = "${path.module}/fm_duck.py"
+    destination = "/tmp/fm_duck.py"
   }
 
   # Single && chain so a failing script can't be masked by the rm -f exiting 0

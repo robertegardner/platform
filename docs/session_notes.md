@@ -33,6 +33,13 @@ item 4) escalated from flapping to hard failure during peak attic heat:
   flap gate over a warm-afternoon window before trusting it.
 - Same day, unrelated: Butterchurn visualizer shipped in radio.html (radio
   repo), native projectM MILKDROP + duck-on-talk shipped in radio-android.
+- **fm-duck shipped (distribution, .82):** server-side talk-ducked relay
+  `/fm.mp3` -> `/fm-duck.mp3` (`fm-duck.service`, decode->classify->gain->
+  re-encode; same v2 classifier as the web/Android duck) so GUI-less
+  streamers (WiiM) duck by URL choice. Provisioned via the distribution
+  module (fm_duck.py + unit + root-only env w/ source password); the
+  provisioner now restarts icecast2 ONLY on fresh config (re-provisions no
+  longer drop listeners/the Pi publisher). Registry: /fm-duck.mp3 added.
 
 ## 2026-06-10 — DAY SUMMARY (for the next session)
 

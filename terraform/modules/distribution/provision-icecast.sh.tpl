@@ -13,9 +13,11 @@ apt-get update -qq
 apt-get install -y -qq icecast2 curl
 
 echo "==> icecast.xml (write only if not platform-managed)"
-if grep -q "platform-managed" /etc/icecast2/icecast.xml 2>/dev/null; then
+ICECAST_CONFIG_FRESH=0
+if grep "platform-managed" /etc/icecast2/icecast.xml >/dev/null 2>&1; then
   echo "    /etc/icecast2/icecast.xml already platform-managed - keeping it"
 else
+  ICECAST_CONFIG_FRESH=1
   cat > /etc/icecast2/icecast.xml <<'EOF'
 <!-- platform-managed: written by the distribution provisioner. Edits survive
      re-provisioning (the provisioner only writes when this marker is absent). -->
@@ -88,11 +90,55 @@ if [ -f /etc/default/icecast2 ]; then
   sed -i 's/^ENABLE=.*/ENABLE=true/' /etc/default/icecast2
 fi
 
-echo "==> enable + restart icecast2 (restart, never enable --now: loads new config)"
+echo "==> enable icecast2; restart ONLY on fresh config (a restart drops every"
+echo "    listener AND the Pi's publishing ffmpeg — ~2 min fm.mp3 outage until"
+echo "    pi-fm-watch heals it; never disturb a healthy daemon on re-provision)"
 systemctl enable icecast2
-systemctl restart icecast2
-sleep 2
+if [ "$${ICECAST_CONFIG_FRESH}" = "1" ] || ! systemctl is-active icecast2 >/dev/null; then
+  systemctl restart icecast2
+  sleep 2
+fi
 systemctl is-active icecast2
+
+echo "==> fm-duck: server-side talk-ducked relay mount (/fm-duck.mp3)"
+# Decode->classify->gain->re-encode of the local /fm.mp3 so GUI-less network
+# streamers (WiiM) get ducking by URL choice. App + unit + env are
+# deterministic from this template, so they are (re)written every provision —
+# unlike icecast.xml there is no manual state to preserve.
+apt-get install -y -qq ffmpeg python3-numpy
+install -d -m 0755 /opt/fm-duck
+# fm_duck.py is pushed to /tmp by a Terraform file provisioner (see main.tf).
+install -m 0755 /tmp/fm_duck.py /opt/fm-duck/fm_duck.py && rm -f /tmp/fm_duck.py
+
+cat > /etc/fm-duck.env <<'EOF'
+SOURCE_URL=http://127.0.0.1:8000/fm.mp3
+MOUNT_URL=icecast://source:${source_password}@127.0.0.1:8000/fm-duck.mp3
+EOF
+chmod 600 /etc/fm-duck.env
+
+cat > /etc/systemd/system/fm-duck.service <<'EOF'
+[Unit]
+Description=Talk-ducked relay of /fm.mp3 -> /fm-duck.mp3 (for GUI-less streamers)
+After=network-online.target icecast2.service
+Wants=icecast2.service
+
+[Service]
+# Exits whenever the upstream mount drops (Pi restarts the stream on every
+# tune); restart until it returns. EnvironmentFile is root-only (source
+# password) — systemd reads it before dropping to User=.
+EnvironmentFile=/etc/fm-duck.env
+ExecStart=/usr/bin/python3 /opt/fm-duck/fm_duck.py
+User=icecast2
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable fm-duck
+systemctl restart fm-duck
 
 echo "==> provisioning complete"
 curl -sS -m 5 http://localhost:8000/status-json.xsl >/dev/null && echo "    status endpoint OK"
