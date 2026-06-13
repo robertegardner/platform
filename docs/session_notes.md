@@ -4,6 +4,42 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-13 (evening) — Radio-domain antenna triage (wxsat fail + dead AM); two physical fixes pending
+
+**State: still V1-hybrid. No code or deploy changes — two physical-layer antenna
+faults diagnosed, both deferred by the user to the next attic trip (after the
+next sat pass or when the Airspy R2 arrives). Diagnoses recorded so a future
+session doesn't re-derive them.**
+
+- **wxsat pass "failed again" — receiver fine, no signal.** Both 2026-06-13
+  Meteor-M2 4 passes (max 34° and 28°) recorded `failed`: full **3.66 GB**
+  baseband captured, but SatDump decoded **0 CADU frames** (SNR 0 dB,
+  Viterbi/Deframer NOSYNC, BER ~0.40 noise floor; 0 MSU-MR lines). PSD of the
+  baseband (no DC offset, in-band only ~3 dB over the edges, one off-grid spur
+  at −151 kHz) confirmed **no LRPT carrier present** — acquisition healthy, the
+  satellite just wasn't heard.
+- **Root cause = unpowered LNA on the wxsat path.** Capture runs on the **dx-R2
+  Antenna B** (`wxsat_capture.sh:162`, "dipole + Sawbird+ NOAA LNA"), NOT a
+  dedicated RTL v4 — registry marks ports B/C "physical-readiness only." That
+  `rx_sdr` line passes **no bias-T**, and the bias-T automation (platform agent)
+  targets the *RTL v4*, not this dx-R2 path → the Sawbird ran unpowered.
+  **User powered the LNA externally** and is repositioning the dipole
+  (~53 cm legs, 120° V, horizontal, **apex North** = N–S axis for the polar
+  track). Validate on the **2026-06-14 09:24Z, 60° overhead** pass. Code fix
+  still available if wanted: `rx_sdr -d "driver=sdrplay,biasT_ctrl=true"`.
+- **AM (Antenna C) dead feed.** User added a choke to the AM loop today → static;
+  reverted to the long wire → still static even on 960 (KSIM local). am_stream.py's
+  startup RFI scan (`/run/sdr-streams/rfi_status.json`) at 960 kHz:
+  **station_snr −1.44 dB** (carrier *below* noise floor), KMOX 1120 / all grid
+  stations absent, only off-grid birdies (1195/1205/1635 kHz) = the
+  "antenna-disconnected" signature. Receiver + DSP confirmed nominal in the same
+  log (HDR engaged, DAB notch on, broadcast `rfnotch` correctly OFF, PLL locks,
+  Antenna C selected). Fault is **common to both the loop+choke and the long
+  wire** → the shared connection the user changed today: **prime suspect the
+  choke / disturbed SMA**. Next attic trip: bypass-test the choke (bare wire to
+  Antenna C) — a local should jump +30–50 dB; scan re-runs on every
+  `systemctl restart sdr-fm@active`.
+
 ## 2026-06-13 (late afternoon) — V2 CUTOVER ROLLED BACK: UDP IQ garbles analog FM
 
 **State: back on V1-hybrid (FM DSP on the Pi), web audio + RDS clean. The V2

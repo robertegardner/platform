@@ -154,7 +154,17 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
 - Brings up one source server per device (`sdr-source@.service`) on the ports in
   the device registry, and the platform agent.
 - **The platform agent sets the RTL v4 bias-tee** (powers the Sawbird) Pi-side —
-  not the SatDump client.
+  not the SatDump client. **CAVEAT (V1-hybrid, 2026-06-13):** wxsat actually
+  captures on the **dx-R2 Antenna B** (`wxsat_capture.sh` borrows the device,
+  not a dedicated RTL v4 yet), and that `rx_sdr` line passes **no bias-T** — so
+  the Sawbird+ NOAA LNA on Antenna B runs unpowered unless powered externally
+  (or you add `-d "driver=sdrplay,biasT_ctrl=true"`). Symptom of the unpowered
+  LNA: full baseband captures but SatDump decodes 0 CADU (SNR 0 dB, NOSYNC).
+- **AM (dx-R2 Antenna C) diagnostic:** `am_stream.py` runs a 5 s noise-floor /
+  station-SNR scan on every start → `/run/sdr-streams/rfi_status.json` (+ the
+  `sdr-fm@active` journal). `station_snr_db` near/below 0 with only off-grid
+  birdies above the floor = no antenna signal (feed/connector fault), NOT a
+  receiver bug — HDR/DAB-notch are on and broadcast `rfnotch` is correctly OFF.
 - The **device registry** (`docs/` / config) is the source of truth for
   device→antenna→filter→band→domain→endpoint. It replaces the dead RF switch.
 
