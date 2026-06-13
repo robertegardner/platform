@@ -4,6 +4,23 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-13 — Interim antenna farm recorded (registry only, no deploy)
+
+**State: still V1-hybrid; Airspy R2 + RTL v4 enroute (not yet here). sdrplay
+(dx-R2) + nooelec (rtl-2838) remain the only live tuners.** Recorded the
+current physical antenna assignments in `terraform/registry/devices.json`:
+
+- **dx-R2 (sdrplay, RSPdx-R2 — single tuner, 3 software-selectable inputs):**
+  added an `_antenna_ports` map. **A** = Shakespeare 5120 + FM bandpass
+  (active FM job, unchanged); **B** = dipole + Sawbird+ NOAA (LNA) — interim
+  NOAA/Meteor, role slated for `rtl-v4`; **C** = AM loop + inline choke —
+  interim AM broadcast, role slated for `hf-plus`. One band at a time, so B/C
+  are physical-readiness only while V1-hybrid FM owns the device.
+- **rtl-2838 (nooelec):** `filter` `none` → `Flamingo FM band-stop` on the
+  discone (matches what `airspy-r2` inherits on arrival).
+- Underscore-prefixed key + descriptive `filter` only — provisioner
+  (`present: true` iteration) untouched, no `terraform apply`.
+
 ## 2026-06-12 (evening) — Duck/ICY stack validated on-air; flap gate PASS
 
 **State: 100FDX interim holding (flap gate: 0 events / 4.5 h incl. warm

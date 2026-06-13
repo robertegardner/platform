@@ -7,6 +7,12 @@
       "antenna": "Antenna A",
       "feed": "Shakespeare 5120",
       "filter": "FM bandpass",
+      "_antenna_ports": {
+        "_comment": "RSPdx-R2 is a single tuner with 3 software-selectable antenna inputs (one band at a time). 'antenna'/'feed'/'filter' above describe the ACTIVE port (A, the FM job). Ports B and C are an interim antenna farm covering roles slated for dedicated hardware: B -> NOAA/Meteor (rtl-v4), C -> AM broadcast (hf-plus). Until the V1-hybrid FM job stops owning this device, B/C are physical-readiness only.",
+        "Antenna A": "Shakespeare 5120 + FM bandpass (active, fm-multistation)",
+        "Antenna B": "dipole + Sawbird+ NOAA (LNA) — interim NOAA/Meteor",
+        "Antenna C": "AM loop + inline choke — interim AM broadcast"
+      },
       "role": "fm-multistation",
       "domain": "radio",
       "transport": "soapy-remote",
@@ -38,7 +44,7 @@
       "soapy_args": "driver=rtlsdr",
       "antenna": "single",
       "feed": "discone",
-      "filter": "none",
+      "filter": "Flamingo FM band-stop",
       "role": "scanner-p25-interim",
       "domain": "scanner",
       "transport": "soapy-remote",
