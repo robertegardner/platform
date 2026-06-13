@@ -4,6 +4,39 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-13 (afternoon) — V2 RADIO CUT OVER: FM DSP back on .84
+
+**State: V2 radio LIVE. The attic uplink going 2.5G unblocked the IQ-microburst
+contention that forced the rollback. All three re-rollout gates + a 14-min soak
+PASS. radio.rg2.io repointed to .84.**
+
+- **What changed physically (user):** new port + cable on the Attic Camera Flex
+  switch → Pi eth0 back to **1000FDX autoneg ON** (100FDX force gone), stable
+  (0 new flaps over ~6 h incl. warm afternoon). AND the switch's **uplink moved
+  to a 2.5G port** (10GE-capable, links 2.5G; 10G planned w/ fiber later) —
+  raising the shared-uplink ceiling 1G→2.5G. That ceiling lift is what made V2
+  viable; the dedicated attic run is now nice-to-have, not required.
+- **Gates (deployment_notes "V2 radio RE-ROLLOUT runbook"):**
+  - Flap: 0 new events (boot-bounce only) over the warm window. PASS.
+  - Loss: iperf UDP Pi→.84 — 64/102M = 0%, **256M = 0.0019%** (<0.01% gate; was
+    0.03% on the 1G uplink). 400M = 1.2% (ceiling above V2 rate; Pi 1G egress /
+    LXC rx buffers, not the 2.5G uplink). PASS.
+  - IQ: `tools/capture-iq.py` from .84 — 2 Msps CLEAN; **8 Msps × 120 s, 0
+    overflow / 0 timeout, 255 Mbps**. PASS (the real V2 test).
+- **Cutover executed (runbook steps 2–8):** used a 15-min systemd-run dead-man
+  while testing; disarmed it first thing at cutover. Pi: `sdr-fm@active` masked,
+  `sdr-source@dx-r2` enabled+active (:55001), `pi-fm-watch`+captions disabled.
+  .84: `sdr-fm@active`/`sdr-tuner`/`sdr-captions`/`fm-watch.timer` enabled+active.
+  Tune cycle 99.3 (KCGQ-FM) ↔ 100.7 (KGMO) verified via `/api/tune`; resting on
+  **100.7 KGMO** (primary), mount audio mean ~-22/max ~-10 dB. Soak 9/9 mount=200,
+  0 stream errors. NPM: `radio.rg2.io` → .84:8080 (verified now_playing through
+  the public URL). icy-pusher follows automatically; fm-duck unaffected.
+- **Open / non-blocking:** RDS ps/rt decode null on .84 (redsea-on-.84 follow-up
+  — captions+FCC carry now_playing); stream is **128k mono** via the UI
+  `/api/bitrate` setting (bump if V1 was 256k); UI AM/HD tune still stops the
+  rack stream (stream.sh exit 78) until an FM retune; Pi `sdr-tuner` left running
+  but orphaned (radio.rg2.io no longer points at it — harmless, optional cleanup).
+
 ## 2026-06-13 — Interim antenna farm recorded (registry only, no deploy)
 
 **State: still V1-hybrid; Airspy R2 + RTL v4 enroute (not yet here). sdrplay

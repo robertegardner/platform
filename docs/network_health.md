@@ -1,9 +1,9 @@
 # Network health — gates, monitoring, and the link-flap saga
 
 Project notes for the V2 rollout gates and the monitoring built during the
-2026-06-10/11 stability hunt. Status as of 2026-06-11 morning: **V2 radio
-re-rollout ON HOLD** pending physical fixes (below); scanner V2 stays live
-(watchdogs absorb the residual flaps).
+2026-06-10/11 stability hunt. Status as of **2026-06-13: V2 radio CUT OVER**
+— the attic uplink going 2.5G (item 6) lifted the contention ceiling, all
+gates passed, FM DSP runs on .84. Scanner V2 stays live.
 
 ## Root cause record (chronological, each layer real)
 
@@ -29,6 +29,16 @@ re-rollout ON HOLD** pending physical fixes (below); scanner V2 stays live
    **Outcome: 100FDX forced (user) → FLAP GATE PASS — 0 link events over a
    4.5 h window spanning the warm evening (15:20→19:55 CDT). The interim
    holds; the dedicated run remains the real fix.**
+6. **2026-06-13 — RESOLVED at gigabit + V2 unblocked (user).** New port +
+   cable on the Attic Camera Flex switch → eth0 **1000FDX, autoneg ON**, stable
+   (0 new flaps over ~6 h incl. warm afternoon; 100FDX force removed) — the
+   marginal-medium issue (#4/#5) is fixed by the new cable. Crucially the user
+   also moved the switch **uplink to a 2.5G port** (10GE-capable, links 2.5G;
+   10G planned when fiber is run): the shared-uplink contention ceiling that
+   tail-dropped IQ microbursts went **1G→2.5G**, which is what unblocked V2.
+   All three re-rollout gates re-run and PASS (256M loss 0.0019%; 8 Msps IQ
+   120 s 0/0; 14-min soak clean) → **V2 radio cut over** (session_notes
+   2026-06-13). The dedicated attic run is now nice-to-have, not required.
 
 ## V2 re-rollout gates (re-run after the physical fixes)
 

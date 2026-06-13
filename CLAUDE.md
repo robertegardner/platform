@@ -9,12 +9,22 @@ lives in the sibling repos `radio` (v2) and `scanner` (v2); this repo owns the
 device registry, the source/mount contracts, and the Terraform that stands the
 whole thing up.
 
-## Current state (2026-06-12 night: V1 hybrid stable on 100FDX interim)
+## Current state (2026-06-13: V2 RADIO CUT OVER — FM DSP back on .84, all 3 gates PASS)
 
-- **Attic link (2026-06-12): hard-failed at gigabit (wedged PHY, 10 W/no-link
-  at peak heat), now FORCED 100FDX (user) — flap gate PASS (0 events/4.5 h
-  warm window). The dedicated attic run is a V1 reliability requirement now,
-  not just the V2 unpause gate. Full record: docs/network_health.md #5.**
+- **Attic link (2026-06-13): RESOLVED at gigabit (user). New port + cable on
+  the Attic Camera Flex switch → eth0 1000FDX, autoneg ON, stable (0 new flaps
+  over a ~6 h window incl. warm afternoon; only the boot-bounce). The 100FDX
+  force is gone. KEY: the user also moved the switch's uplink to a 2.5G port
+  (10GE-capable, links at 2.5G now; 10G planned when fiber is run), lifting the
+  shared-uplink contention ceiling from 1G → 2.5G — that is what unblocked V2.
+  The dedicated attic run is no longer required for V1 reliability; it remains a
+  nice-to-have (full path off the camera switch). Full record: network_health.md.**
+- **V2 re-rollout gates (2026-06-13, all PASS):** flap=0 (warm window); iperf
+  UDP loss Pi→.84 256 Mbps = 0.0019% (<0.01% gate; was 0.03% on the 1G uplink);
+  IQ gate `tools/capture-iq.py` from .84 = 2 Msps AND **8 Msps × 120 s, 0
+  overflow / 0 timeout, 255 Mbps** (the V2 target). 14-min soak: 9/9 mount=200,
+  0 stream errors. (Note: 400 Mbps iperf showed 1.2% loss — a ceiling above the
+  V2 rate, likely Pi 1G egress / LXC UDP rx buffers, not the 2.5G uplink.)
 - **Distribution (.82) gained two services (2026-06-12, both in the
   distribution module):** `fm-duck` — talk-ducking relay `/fm.mp3` →
   `/fm-duck.mp3` for GUI-less streamers (WiiM), server-calibrated classifier,
@@ -24,18 +34,22 @@ whole thing up.
   icecast2 unless its config is freshly written. NOTE: fm-duck is a permanent
   /fm.mp3 listener — wxsat's skip-when-listening (radio repo) now queries the
   RACK and discounts it.
-- **RADIO = V1 hybrid:** DSP back on the Pi (`sdr-fm@active` unmasked,
-  enabled; `sdr-source@dx-r2` disabled — the V1 radio owns the dx-R2 again),
-  but it **publishes to the rack Icecast** (`ICECAST_HOST=192.168.6.82` in
-  the Pi's active.env; stream.sh host is env-able, mirrored into the radio
-  repo). Pi `sdr-captions` re-enabled. Rack FM units on .84 all disabled
-  (`sdr-fm@active`, `fm-watch.timer`, `sdr-tuner`, `sdr-captions`).
-  **WHY:** raw-IQ-over-network is unusable on the current topology — the Pi
-  shares the attic camera flex whose 1G uplink carries 8 cameras + an
-  HDHomeRun; SoapyRemote's line-rate microbursts tail-drop there (full
-  diagnosis in deployment_notes.md). **Unpause when the dedicated attic run
-  to the aggregation switch exists**; the V2 re-cutover is the documented
-  switch steps (everything stays provisioned on .84).
+- **RADIO = V2 (cut over 2026-06-13):** FM DSP runs on **radio-compute (.84)**
+  off the remote dx-R2. Pi: `sdr-fm@active` **masked**, `sdr-source@dx-r2`
+  **enabled+active** (serving CS16 on :55001), `pi-fm-watch.timer` disabled, Pi
+  `sdr-captions` disabled. .84: `sdr-fm@active`, `sdr-tuner`, `sdr-captions`,
+  `fm-watch.timer` all **enabled+active**; stream.sh publishes to .82 Icecast.
+  `radio.rg2.io` → **.84:8080** (NPM repointed — the Android app's radio
+  backend + the tuner UI/API). Resting on **100.7 KGMO** (primary); FM tune
+  cycle 99.3↔100.7 verified via `/api/tune`. icy-pusher follows automatically
+  (polls radio.rg2.io); fm-duck unaffected (still listens to .82 /fm.mp3).
+  **Open items (non-blocking):** RDS ps/rt decode null on .84 (redsea-on-.84
+  follow-up — captions + FCC carry now_playing); stream is **128k mono** (a UI
+  `/api/bitrate` setting — bump if V1 was 256k); an AM/HD tune from the UI still
+  stops the rack stream (stream.sh exit 78) until an FM retune. **Rollback (R):**
+  deployment_notes.md "V2 radio RE-ROLLOUT runbook" — .84 disable FM units; Pi
+  unmask+start `sdr-fm@active`, disable `sdr-source@dx-r2`, re-enable
+  `pi-fm-watch`+captions; NPM radio.rg2.io back to radio.srvr:8080.
 - **P25 stays V2 on scanner-compute** (LXC **901**, .83): op25 on the interim
   `rtl-2838` (:55005, enabled at boot) → rack `/ems.mp3` — its 38 Mbps CU8
   survives the shared uplink acceptably. Interim-dark:
@@ -216,13 +230,12 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
    user)**. Both mounts rack-served.
 3. ✅ `scanner-compute` — op25 LIVE on the interim rtl-2838; `/ems.mp3`
    rack-sourced. Remaining: scanner v2 app work on Airspy R2 arrival.
-4. ⏸️ `radio-compute` — **PAUSED, rolled back to V1-hybrid** (attic uplink
-   can't carry IQ microbursts — see Current state). Everything stays
-   provisioned on .84. **Unpause = dedicated attic ethernet run**, then:
-   stop Pi `sdr-fm@active` (+disable), enable `sdr-source@dx-r2`, enable
-   `.84` units (`sdr-fm@active`, `sdr-tuner`, `sdr-captions`,
-   `fm-watch.timer`), verify; add `tc fq maxrate` pacing on the Pi as
-   belt-and-braces. Then the stereo mux (radio repo v2) targets .84.
+4. ✅ `radio-compute` — **V2 LIVE (cut over 2026-06-13)** once the attic
+   uplink went 2.5G (contention ceiling 1G→2.5G unblocked the IQ microbursts).
+   FM DSP on .84 off the remote dx-R2; `radio.rg2.io` → .84:8080. All gates +
+   14-min soak passed (see Current state). Next: the stereo mux (radio repo v2)
+   targets .84; RDS-on-.84 decode fix; optional `tc fq maxrate` pacing on the
+   Pi as belt-and-braces.
 
 ## NPM proxy map (user-managed; TARGET state for the Android app — see
 ## deployment_notes "Android app integration")
@@ -230,8 +243,9 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
 - `icecast.rg2.io` → 192.168.6.82:8000 (rack Icecast — all public audio)
 - `scanner.rg2.io` → 192.168.6.83:8080 (op25 console; legacy page is the
   data-complete one under single-receiver rx.py)
-- `radio.rg2.io` → **radio.srvr:8080** (live V1 tuner API+UI — the Android
-  app's radio backend; moves to .84:8080 at the radio unpause)
+- `radio.rg2.io` → **192.168.6.84:8080** (V2 tuner API+UI on radio-compute —
+  the Android app's radio backend; repointed from radio.srvr:8080 at the
+  2026-06-13 V2 cutover)
 - `ems.rg2.io` → **192.168.6.83:8081** (scanner-api bridge — the Android
   app's scanner backend; deployed from the scanner repo). NEVER point it at
   the Pi's old scheduler — its MOSWIN job USB-resets the dongle out from
