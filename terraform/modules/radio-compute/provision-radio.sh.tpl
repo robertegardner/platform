@@ -82,6 +82,19 @@ if command -v rx_fm >/dev/null 2>&1; then
 else
   tmp="$(mktemp -d)"
   git clone --depth 1 https://github.com/rxseger/rx_tools.git "$tmp/rx_tools"
+  # Patch verbose_setup_stream to read SoapyRemote stream args from $RX_STREAM_ARGS,
+  # so the FM stream can force lossless TCP (remote:prot=tcp). Plain-UDP IQ loss
+  # garbles analog FM (each dropped datagram = a click; RDS dies) — the reason the
+  # 2026-06-13 V2 cutover was rolled back. Harmless for non-remote drivers (the
+  # remote: arg is namespaced + ignored).
+  python3 - "$tmp/rx_tools/src/convenience/convenience.c" <<'PYEOF'
+import sys
+p = sys.argv[1]; s = open(p).read()
+m = "SoapySDRKwargs stream_args = {0};"
+add = ' const char *rx_sa = getenv("RX_STREAM_ARGS"); if (rx_sa && *rx_sa) { stream_args = SoapySDRKwargs_fromString(rx_sa); }'
+assert s.count(m) == 1, ("RX_STREAM_ARGS patch marker count", s.count(m))
+open(p, "w").write(s.replace(m, m + add, 1))
+PYEOF
   cmake -S "$tmp/rx_tools" -B "$tmp/rx_tools/build" -DCMAKE_BUILD_TYPE=Release
   cmake --build "$tmp/rx_tools/build" -j"$(nproc)"
   cmake --install "$tmp/rx_tools/build"
@@ -188,6 +201,12 @@ else
 set -euo pipefail
 source /etc/sdr-streams/active.env
 source /etc/radio-compute/source-dx-r2.env
+
+# Force the remote dx-R2 IQ stream onto lossless TCP. SoapyRemote's default UDP
+# firehose drops datagrams under uplink contention; analog FM turns each drop
+# into a click and RDS dies (the 2026-06-13 V2 rollback). rx_tools reads this in
+# verbose_setup_stream (local patch). No-op for non-remote drivers.
+export RX_STREAM_ARGS=remote:prot=tcp
 
 ICECAST_URL="icecast://source:$ICECAST_PASS@${icecast_host}:${icecast_port}/$MOUNT"
 
