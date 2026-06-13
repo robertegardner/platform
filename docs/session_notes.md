@@ -31,6 +31,19 @@ PASS. radio.rg2.io repointed to .84.**
   **100.7 KGMO** (primary), mount audio mean ~-22/max ~-10 dB. Soak 9/9 mount=200,
   0 stream errors. NPM: `radio.rg2.io` → .84:8080 (verified now_playing through
   the public URL). icy-pusher follows automatically; fm-duck unaffected.
+- **POST-CUTOVER FIX — FM distortion (same day):** users reported "very
+  distorted" FM after the cutover. NOT gain/clipping (remote IQ measured clean,
+  mean|IQ|≈0.20, 0% clip at every gain incl. AGC) and the .84 vs Pi `stream.sh`
+  FM pipelines are functionally identical. ROOT CAUSE: at cutover I `enable`d
+  `sdr-source@dx-r2` for the IQ-gate test, ran capture-iq at 2 AND 8 Msps
+  against it, then connected .84's LIVE rx_fm to that **same un-restarted
+  source instance** — the test runs left the sdrplay session in a degraded
+  rate/state that served subtly-bad IQ (audible distortion, normal levels).
+  FIX = the ordered bounce (restart `sdr-source@dx-r2` on the Pi → reset-failed
+  + restart `sdr-fm@active` on .84). Verified clean + stable (Flat factor 0,
+  no clipping) across multiple samples; restored to 100.7 KGMO. **Lesson: after
+  ANY capture-iq/IQ testing against a source, restart that source fresh before
+  pointing a live client at it.** Added to the runbook + gotchas.
 - **Open / non-blocking:** RDS ps/rt decode null on .84 (redsea-on-.84 follow-up
   — captions+FCC carry now_playing); stream is **128k mono** via the UI
   `/api/bitrate` setting (bump if V1 was 256k); UI AM/HD tune still stops the

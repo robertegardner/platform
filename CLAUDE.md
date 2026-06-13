@@ -188,6 +188,14 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   gate it).
 - **One client per device source.** The scanner scheduler holds one persistent
   client to the R2 and retunes in place — it does not open/close repeatedly.
+- **Restart a source FRESH before connecting a live client to it.** A
+  `sdr-source@*` instance that's just been hammered by `capture-iq` / IQ
+  testing (repeated open/close + rate changes) can be left in a degraded
+  state that serves subtly-bad IQ — clean amplitude (mean|IQ|≈0.2, 0% clip)
+  but audible demod distortion downstream. Bit the 2026-06-13 FM cutover
+  (live rx_fm was connected to the post-IQ-gate source). Cure = the ordered
+  bounce. Lesson: `systemctl restart sdr-source@<dev>` after any test window,
+  before the live client attaches.
 - **Wire format:** CS16 for dx-R2/Airspys, CU8 for the RTL v4; set client-side at
   connect (in the registry). Hold dx-R2 **≤8 Msps** on a single USB hub.
 - **Unprivileged LXCs** — no USB passthrough, no device nodes (samples arrive
