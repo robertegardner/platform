@@ -26,6 +26,9 @@ re-rollout ON HOLD** pending physical fixes (below); scanner V2 stays live
    **the dedicated attic run is required for V1 reliability, not just V2**.
    Interim triage order: different switch port → reseat connectors → force
    100FDX (2-pair stopgap; V1-hybrid + scanner CU8 traffic fits in 100M).
+   **Outcome: 100FDX forced (user) → FLAP GATE PASS — 0 link events over a
+   4.5 h window spanning the warm evening (15:20→19:55 CDT). The interim
+   holds; the dedicated run remains the real fix.**
 
 ## V2 re-rollout gates (re-run after the physical fixes)
 

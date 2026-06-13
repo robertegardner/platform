@@ -4,6 +4,34 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-12 (evening) — Duck/ICY stack validated on-air; flap gate PASS
+
+**State: 100FDX interim holding (flap gate: 0 events / 4.5 h incl. warm
+evening). fm-duck + icy-pusher live and validated against a real ad break.**
+
+- **On-air validation (19:38 CDT):** track-ID cleared → classifier ducked
+  (score 0.32; beat collapsed to 0.00 — the talk signature) → ICY marker
+  "KGMO 100.7 at commercial" swapped within 1 s → un-duck 29 s later →
+  one song (~4 min) → next break ducked. Working as designed.
+- fm-duck classifier needed SERVER-calibrated scales (HF_FULL 0.20,
+  CV_FULL 1.20) — client constants don't transfer to linear-PCM rfft
+  magnitudes (music sat at 0.36–0.47 and nothing ever ducked). Probe +
+  component heartbeats are the tuning loop (`journalctl -u fm-duck`).
+- **wxsat skip-when-listening fixed (radio repo fcabdb5):** the gate
+  queried the Pi's icecast (always 0 since the cutover → captured despite
+  listeners). Now queries the RACK (env-able WXSAT_ICECAST_STATUS) and
+  discounts the fm-duck relay (detected via its mount in the same payload).
+  Live-verified: raw=3 internal=2 human=1.
+- One isolated publisher TCP reset (19:21 CDT, link clean) self-healed
+  end-to-end in ~100 s: pi-fm-watch → sdr-fm restart → fm-duck reconnect →
+  ICY re-latch. The recovery chain works.
+- **Tomorrow / open:** duck-tuning v2 on Android needs a sideload
+  (radio-android 740ddf5); dedicated attic run still the real fix (V1
+  reliability + V2 unpause); optional duck v3 = fuse now_playing hints
+  (captions/track-ID) to kill the music-bed-commercial blind spot;
+  consider liquidsoap-wrapping fm-duck if WiiM doesn't auto-reconnect
+  across Pi tunes.
+
 ## 2026-06-12 (afternoon) — Attic link DIED outright (escalation of the flap saga)
 
 **State: Pi OFFLINE/bouncing pending physical fix. Both public streams were

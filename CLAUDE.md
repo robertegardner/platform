@@ -9,8 +9,21 @@ lives in the sibling repos `radio` (v2) and `scanner` (v2); this repo owns the
 device registry, the source/mount contracts, and the Terraform that stands the
 whole thing up.
 
-## Current state (2026-06-10 night: V2 radio PAUSED — V1 hybrid restored)
+## Current state (2026-06-12 night: V1 hybrid stable on 100FDX interim)
 
+- **Attic link (2026-06-12): hard-failed at gigabit (wedged PHY, 10 W/no-link
+  at peak heat), now FORCED 100FDX (user) — flap gate PASS (0 events/4.5 h
+  warm window). The dedicated attic run is a V1 reliability requirement now,
+  not just the V2 unpause gate. Full record: docs/network_health.md #5.**
+- **Distribution (.82) gained two services (2026-06-12, both in the
+  distribution module):** `fm-duck` — talk-ducking relay `/fm.mp3` →
+  `/fm-duck.mp3` for GUI-less streamers (WiiM), server-calibrated classifier,
+  validated on-air; `icy-pusher` — now-playing → ICY StreamTitle on both
+  mounts, with a "<station> at commercial" marker on the duck mount while
+  ducked (state via /run/fm-duck/state). Re-provisions no longer restart
+  icecast2 unless its config is freshly written. NOTE: fm-duck is a permanent
+  /fm.mp3 listener — wxsat's skip-when-listening (radio repo) now queries the
+  RACK and discounts it.
 - **RADIO = V1 hybrid:** DSP back on the Pi (`sdr-fm@active` unmasked,
   enabled; `sdr-source@dx-r2` disabled — the V1 radio owns the dx-R2 again),
   but it **publishes to the rack Icecast** (`ICECAST_HOST=192.168.6.82` in
