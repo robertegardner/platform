@@ -4,6 +4,39 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-13 (late afternoon) — V2 CUTOVER ROLLED BACK: UDP IQ garbles analog FM
+
+**State: back on V1-hybrid (FM DSP on the Pi), web audio + RDS clean. The V2
+cutover below was REVERTED hours later — the IQ gate is necessary but NOT
+sufficient for analog FM.**
+
+- Users heard **garbled, unlistenable** FM after the cutover (web + Android).
+  First red herring: chased ADC gain/clipping (IQ measured clean, ~0.20, 0%
+  clip) and a stale post-test source (ordered bounce helped levels but not the
+  garble). astats said "clean" — misleading; it can't see dropouts/garble.
+- **ROOT CAUSE (spectrogram from codeserver showed ~9 broadband clicks/s):
+  SoapyRemote streams IQ over UDP** (confirmed: :55001 control is TCP, the
+  sample flow is a UDP socket). Analog FM demod can't tolerate the packet loss
+  — each lost IQ datagram = a click; **RDS dies** (dead on V2, decodes cleanly
+  on V1 — the sensitive tell the user flagged). P25/CU8 survives (digital/FEC),
+  which is why the same transport passed the IQ gate. The IQ gate only counts
+  overflow/timeout, NOT UDP sample loss.
+- Tried forcing `remote:prot=tcp` via rx_fm `-d` device args → rx_fm does NOT
+  forward it to setupStream; the stream stalled (0 bytes / hang). So the V2-TCP
+  fix needs a stream-arg-capable client (or a SoapyRemote-level config),
+  bench-verified.
+- **ROLLBACK (done):** .84 FM units disabled; Pi `sdr-fm@active` unmasked+started
+  (local sdrplay, 100.7 KGMO), `sdr-source@dx-r2` disabled, captions+pi-fm-watch
+  re-enabled; NPM `radio.rg2.io` → radio.srvr:8080. Web audio + RDS confirmed
+  clean by the user. **V2 retry gate: lossless IQ transport + RDS-decode + a
+  listen on the bench BEFORE re-cutover. RDS is the cheap pass/fail signal.**
+- **SEPARATE, still open — Android app: no audio / no viz / no captions** (title
+  still updates), duck on or off. Not the cutover (present on V1 too) and not the
+  duck (toggle no-op). All three are tap-derived → the app's **ExoPlayer isn't
+  playing `https://icecast.rg2.io/fm.mp3`** (browser plays it fine). Needs a
+  logcat to pinpoint (ICY-metadata parse? recent AudioTapHub/playback regression
+  in radio-android?). Stream URL is correct (`RadioSettings.DEFAULT_STREAM_URL`).
+
 ## 2026-06-13 (afternoon) — V2 RADIO CUT OVER: FM DSP back on .84
 
 **State: V2 radio LIVE. The attic uplink going 2.5G unblocked the IQ-microburst
