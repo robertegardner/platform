@@ -29,6 +29,9 @@ def main():
     ap.add_argument("--duration", type=float, default=20.0)
     ap.add_argument("--dump", default=None, help="raw CS16 output file (optional)")
     ap.add_argument("--dump-secs", type=float, default=2.0)
+    ap.add_argument("--prot", default=None,
+                    help="SoapyRemote stream protocol passed to setupStream "
+                         "(tcp = lossless/retransmit, udp = default firehose, udt = reliable-UDP)")
     args = ap.parse_args()
 
     dev_args = f"driver=remote,remote={args.remote}"
@@ -57,7 +60,9 @@ def main():
     print(f"[*] freq {dev.getFrequency(SOAPY_SDR_RX, 0)/1e6:.3f} MHz, "
           f"antenna {dev.getAntenna(SOAPY_SDR_RX, 0)!r}", flush=True)
 
-    st = dev.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CS16)
+    stream_args = {"remote:prot": args.prot} if args.prot else {}
+    print(f"[*] setupStream args: {stream_args or '(default: udp)'}", flush=True)
+    st = dev.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CS16, [0], stream_args)
     dev.activateStream(st)
 
     chunk = 1 << 16  # 65536 complex samples per read
