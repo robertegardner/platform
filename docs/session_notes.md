@@ -4,6 +4,43 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-14 (latest) — wxsat UI fix (proxy + delete), V2 cleanup pass
+
+**State: V2 FM still LIVE on .84 (mono, now 256k). wxsat web UI now works on
+radio.rg2.io; web-UI delete fixed. Starting stereo round 2.**
+
+- **wxsat UI was empty on radio.rg2.io.** Root cause: the V2 cutover repointed
+  radio.rg2.io→.84, but wxsat captures live ONLY on the Pi (scheduler needs the
+  SDR). Fix (radio repo `25993bd`, platform `3fae719`): `app.py` `before_request`
+  hook proxies every `/api/wxsat/*` to `WXSAT_UPSTREAM` (Pi tuner, set in .84's
+  tuner.env; new `pi_host` var in the radio-compute provisioner makes it
+  re-provision-safe). The /wxsat page renders locally; only data+images+rebuild
+  proxy. **Consequence: the Pi sdr-tuner is now the wxsat backend — NOT orphaned,
+  do not retire it.**
+- **Web-UI delete always failed (V1 too).** Access logs showed every real delete
+  → 400 "missing id". Cause: the pass-view modal's "✕ Close" button shared
+  `class="del"`, so closing it fired the delete handler with no data-id. Fix
+  (radio repo `45d5553`): Close → `class="pv"` + guard the handler on data-id.
+  Also delete now removes the canonical `outdir` (not the image's top dir), so
+  FAILED captures' retained multi-GB baseband.cs16 is actually reclaimed (was
+  orphaning ~3.7 GB each).
+- **Offline re-decode of the 09:24Z 60° pass:** 0 frames at both 72k+80k (SNR
+  0 dB, NOSYNC). IQ is NOT flat (mean|IQ|≈0.46) but band-center is at the noise
+  floor with a strong birdie at −147.8 kHz → antenna/RF, not LNA-zero/decode. The
+  06-13 antenna rework did NOT fix it.
+- **256k bump (done).** .84 FM was 128k; bumped to 256k via the tuner's own
+  /api/bitrate (live encoder now `-b:a 256k` on /fm.mp3, persisted in active.env
+  + ui.json). **Pre-existing bug found+fixed:** .84's `/etc/sdr-streams` was
+  `root:root 0755`, so the tuner (User=radio) got EACCES writing `ui.tmp` → EVERY
+  UI settings save (bitrate, site title) silently 500'd. Fixed live
+  (`chown root:radio` + `chmod 0775`, matching the Pi) and in the radio-compute
+  provisioner so it's re-provision-safe.
+- **Cleanup pass:** Pi `icecast2` confirmed idle (LISTEN, 0 inbound clients) —
+  safe to retire (stop+disable), pending a manual run (classifier-gated; user to
+  run `sudo systemctl disable --now icecast2` on the Pi). **Found:** Pi
+  `scanner-transcribe.service` still enabled+running (V1 remnant pulling
+  .82/ems.mp3 → Whisper) — flag for scanner-domain cleanup, not touched.
+
 ## 2026-06-14 (later still) — wxsat made V2-ready for the 09:24Z Meteor pass
 
 **State: METEOR-M2 4 pass 2026-06-14 09:24Z (~60°, NORAD 59051) is software-ready.
@@ -106,9 +143,10 @@ enabled). The 2026-06-13 root-cause ("UDP IQ loss garbles FM") was WRONG.**
 - **Open/non-blocking:** stream is 128k mono (V1 was 256k — bump via UI
   /api/bitrate if wanted); rx_fm build + RX_STREAM_ARGS patch kept in the
   provisioner but now unused by the FM path; mbuffer was apt-installed on .84
-  during diagnosis (harmless leftover, not used by the final stream.sh); the
-  Pi's orphaned sdr-tuner (radio.rg2.io no longer points at it) can be cleaned
-  up; Android-app no-audio is a separate pre-existing issue.
+  during diagnosis (harmless leftover, not used by the final stream.sh);
+  **the Pi sdr-tuner must STAY — as of 2026-06-14 it is the wxsat backend (the
+  .84 tuner proxies /api/wxsat/* to it; see the 2026-06-14 wxsat session note);
+  do NOT clean it up;** Android-app no-audio is a separate pre-existing issue.
 
 ## 2026-06-13 (evening) — Radio-domain antenna triage (wxsat fail + dead AM); two physical fixes pending
 

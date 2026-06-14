@@ -268,8 +268,11 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
 - `scanner.rg2.io` → 192.168.6.83:8080 (op25 console; legacy page is the
   data-complete one under single-receiver rx.py)
 - `radio.rg2.io` → **192.168.6.84:8080** (V2 tuner API+UI on radio-compute — the
-  Android app's radio backend; repointed here at the 2026-06-14 V2 cutover. The
-  Pi's orphaned sdr-tuner can be cleaned up)
+  Android app's radio backend; repointed here at the 2026-06-14 V2 cutover.
+  **Do NOT clean up the Pi's sdr-tuner — it is the wxsat BACKEND.** wxsat is
+  Pi-side (the scheduler needs the SDR), so the .84 tuner proxies every
+  `/api/wxsat/*` call to the Pi via `WXSAT_UPSTREAM=http://radio.srvr:8080`
+  (radio repo 2026-06-14). Keep the Pi sdr-tuner running.)
 - `ems.rg2.io` → **192.168.6.83:8081** (scanner-api bridge — the Android
   app's scanner backend; deployed from the scanner repo). NEVER point it at
   the Pi's old scheduler — its MOSWIN job USB-resets the dongle out from

@@ -159,6 +159,11 @@ echo "==> V1 sdr-streams contract (GUI moved 2026-06-10; replaces the interim fm
 # radio-repo v2 work and exit 78 (RestartPreventExitStatus — no flap loop).
 mkdir -p /etc/sdr-streams /var/lib/sdr-streams /opt/sdr-tuner
 chown -R radio:radio /var/lib/sdr-streams /opt/sdr-tuner
+# /etc/sdr-streams must be group-writable by radio: the tuner (User=radio) writes
+# ui.json (bitrate, site title) there via a temp-file replace (ui_settings.py).
+# Root-owned 0755 here blocks every UI settings save with EACCES on ui.tmp.
+chown root:radio /etc/sdr-streams
+chmod 0775 /etc/sdr-streams
 
 cat > /etc/tmpfiles.d/sdr-streams.conf <<'EOF'
 d /run/sdr-streams 0755 radio radio -
