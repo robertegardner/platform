@@ -412,10 +412,10 @@ After=network-online.target
 Type=oneshot
 User=radio
 Group=radio
-TimeoutStartSec=300
+TimeoutStartSec=900
 ExecStartPre=+/usr/bin/systemctl stop fm-watch.timer
 ExecStartPre=+/usr/bin/systemctl stop sdr-fm@active
-ExecStart=/usr/bin/python3 /opt/sdr-tuner/fm_scan.py
+ExecStart=/usr/bin/python3 /opt/sdr-tuner/fm_scan.py --antennas "Antenna A,Antenna B,Antenna C"
 ExecStopPost=+/usr/bin/systemctl start sdr-fm@active
 ExecStopPost=+/usr/bin/systemctl start fm-watch.timer
 EOF
@@ -429,10 +429,10 @@ After=network-online.target
 Type=oneshot
 User=radio
 Group=radio
-TimeoutStartSec=300
+TimeoutStartSec=600
 ExecStartPre=+/usr/bin/systemctl stop fm-watch.timer
 ExecStartPre=+/usr/bin/systemctl stop sdr-fm@active
-ExecStart=/usr/bin/python3 /opt/sdr-tuner/am_scan.py
+ExecStart=/usr/bin/python3 /opt/sdr-tuner/am_scan.py --antennas "Antenna A,Antenna B,Antenna C"
 ExecStopPost=+/usr/bin/systemctl start sdr-fm@active
 ExecStopPost=+/usr/bin/systemctl start fm-watch.timer
 EOF
