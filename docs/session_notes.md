@@ -4,6 +4,44 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-14 (later) — rack UI deploy + single-station stereo attempt (mono kept)
+
+**State: V2 FM still LIVE on .84, MONO. radio.rg2.io UI now current (viz+bitrate).
+Single-station stereo attempted live, reverted to mono — a stereo-decoder DSP
+artifact remains. No production left on stereo.**
+
+- **Rack app deploy gap closed.** radio.rg2.io UI was stale (app.py from 2026-06-03,
+  no viz/bitrate) because the rack had no deploy target (deploy.sh only did the Pi,
+  and its stream.sh install would clobber the rack wbfm_stream.py chain). Added
+  **`deploy.sh --rack`** (radio repo `a88ba91`): app payload only (python+templates+
+  static viz JS+wbfm_stream.py), restarts sdr-tuner+sdr-captions, leaves audio up,
+  SKIPS stream.sh + Pi-only units/sudoers. Cloned a checkout at **`/opt/radio-src`
+  on .84** (anon HTTPS). Deployed → radio.rg2.io now serves viz + bitrate UI; audio
+  untouched. Future rack deploy: `cd /opt/radio-src && git pull && sudo ./deploy.sh --rack`.
+- **Single-station stereo (radio repo `111e8b9`, WIP — NOT in production).** Reused
+  the multistation stereo matrix: `wbfm_stream.py` (s16le MPX) → tee → redsea +
+  `stereo_decode.py` (added `--in-format s16le`/`--out-format f32le`) → ffmpeg
+  (-ac 2, de-emphasis, alimiter). Decodes real stereo (L−R energy present, RDS
+  intact). Chased clipping through several live iterations:
+  1. Output too hot (max −1.4) → lowered scale → still clipped.
+  2. int16 clip INSIDE stereo_decode: live true peaks hit **~4.3× full scale** (vs
+     0.44 on the offline dump) → switched to `--out-format f32le` (no internal clip).
+  3. ffmpeg `alimiter` default `level=enabled` auto-boosts output back to ~0 dB →
+     added `level=false`.
+  - After all that, output is provably clean digitally (max −4.2 dB) but the user
+    STILL hears clicks → it's a **stereo-matrix DSP artifact**, not clipping: the
+    L−R 38 kHz carrier normalization (`c38n = c38/c38_amp`) spikes on a noisy live
+    pilot, injecting the 4.3× transients = clicks. **The offline dump (clean
+    capture) does NOT reproduce it.** Reverted to mono (stable, clean).
+  - **NEXT (offline, fresh session):** harden carrier recovery in stereo_decode
+    (clamp c38n / floor c38_amp / stronger honesty gate), validate against a FRESH
+    dump captured during spiky conditions, only then a single clean live test.
+- **Ops note:** each live stream.sh swap restarts sdr-fm@active; rapid back-to-back
+  restarts race the SoapyRemote source (one "no packets" crash-loop seen — the
+  "restart source fresh between clients" gotcha). Do single restarts, settle ~20s.
+  An auto-revert transient timer on .84 (`stereo-revert`, copies stream.sh.mono.bak
+  + restarts) was used as the safety net for each live trial.
+
 ## 2026-06-14 — V2 RADIO CUT OVER (for real): the bug was rx_fm, NOT UDP
 
 **State: V2 radio LIVE on .84 via `wbfm_stream.py` over the remote dx-R2 (lossless
