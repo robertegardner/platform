@@ -272,6 +272,10 @@ OP25_TERMINAL_URL=http://127.0.0.1:8080
 API_PORT=8081
 TGID_TAGS=/opt/scanner-compute/moswin-tgid-tags.tsv
 EVENTS_PATH=/var/lib/scanner-compute/call-events.jsonl
+# EMS transcripts surfaced by /api/transcribe + /api/transcript (must match
+# scanner-transcribe's transcribe.env).
+TRANSCRIPTS_DIR=/var/lib/scanner-compute/transcripts
+TRANSCRIBE_STATE_PATH=/run/scanner/transcribe.json
 EOF
 
 echo "==> systemd units (laid down + reloaded; enable/start happens at cutover)"

@@ -78,10 +78,14 @@ radio.rg2.io; web-UI delete fixed.**
   provisioner (new sensitive `whisper_token` var, keep-if-absent env, in tfvars on
   thebeast). Output: `/var/lib/scanner-compute/transcripts/*.jsonl` + live
   `/run/scanner/transcribe.json`. Validated live (real EMS captions decoding).
-  **FOLLOW-UP:** nothing surfaces these yet on the rack — `v2/scanner_api.py` has
-  a `transcript` field it doesn't populate, and `p25.rg2.io` (Pi scanner-ui) reads
-  the *Pi's* transcripts dir, not .83's. Wire scanner-api to serve the .83
-  transcripts/caption-state to surface EMS captions on ems.rg2.io.
+- **scanner-api now serves the EMS transcripts (DONE).** Added two stdlib
+  endpoints to `v2/scanner_api.py` matching the V1 contract exactly:
+  `GET /api/transcribe` → live caption from `/run/scanner/transcribe.json`;
+  `GET /api/transcript?date=&limit=N` → `{date, days[], entries[]}` from the
+  JSONL log. Verified live on **ems.rg2.io/api/transcribe** (real captions).
+  Transcript paths added to `scanner-api.env` (provisioner). Per-call
+  `transcript` in `/api/calls` stays null by design — op25 has no per-call audio,
+  so transcription is stream-level (monitor mode), not call-keyed.
 
 ## 2026-06-14 (later still) — wxsat made V2-ready for the 09:24Z Meteor pass
 
