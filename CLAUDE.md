@@ -158,12 +158,18 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
 - Brings up one source server per device (`sdr-source@.service`) on the ports in
   the device registry, and the platform agent.
 - **The platform agent sets the RTL v4 bias-tee** (powers the Sawbird) Pi-side —
-  not the SatDump client. **CAVEAT (V1-hybrid, 2026-06-13):** wxsat actually
-  captures on the **dx-R2 Antenna B** (`wxsat_capture.sh` borrows the device,
-  not a dedicated RTL v4 yet), and that `rx_sdr` line passes **no bias-T** — so
-  the Sawbird+ NOAA LNA on Antenna B runs unpowered unless powered externally
-  (or you add `-d "driver=sdrplay,biasT_ctrl=true"`). Symptom of the unpowered
-  LNA: full baseband captures but SatDump decodes 0 CADU (SNR 0 dB, NOSYNC).
+  not the SatDump client. **wxsat captures on the dx-R2 Antenna B**
+  (`wxsat_capture.sh` borrows the device, not a dedicated RTL v4 yet). **V2
+  device handoff (2026-06-14):** the dx-R2 is held by `sdr-source@dx-r2` (serving
+  rack FM), so the capture script now **stops `sdr-source@dx-r2` before `rx_sdr`
+  and restarts it after** (the `radio` user has a NOPASSWD sudoers grant for it;
+  the masked `sdr-fm@active` stop/start are no-ops). After a pass the .84
+  `sdr-fm@active` self-heals onto the fresh source via `Restart=always` +
+  `fm-watch.timer` (~1–2 min FM gap). Validated by a test capture 2026-06-14.
+  **Bias-T:** the `rx_sdr` line passes **no bias-T**, so the Sawbird+ NOAA LNA on
+  Antenna B needs external power (the user powers it; or add
+  `-d "driver=sdrplay,biasT_ctrl=true"`). Symptom of an unpowered LNA: full
+  baseband captures but SatDump decodes 0 CADU (SNR 0 dB, NOSYNC).
 - **AM (dx-R2 Antenna C) diagnostic:** `am_stream.py` runs a 5 s noise-floor /
   station-SNR scan on every start → `/run/sdr-streams/rfi_status.json` (+ the
   `sdr-fm@active` journal). `station_snr_db` near/below 0 with only off-grid

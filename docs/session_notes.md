@@ -4,6 +4,27 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-14 (later still) — wxsat made V2-ready for the 09:24Z Meteor pass
+
+**State: METEOR-M2 4 pass 2026-06-14 09:24Z (~60°, NORAD 59051) is software-ready.
+Antenna optimized + LNA externally powered by the user; the V2 device-handoff gap
+fixed + validated.**
+
+- **Gap:** post-V2-cutover the dx-R2 is held by `sdr-source@dx-r2` (rack FM), but
+  `wxsat_capture.sh` (runs as `radio`, borrows the dx-R2 Antenna B locally) only
+  stopped the now-masked `sdr-fm@active` → `rx_sdr` would hit a busy device and the
+  pass would fail.
+- **Fix (radio repo `75bb5c0`):** capture script stops `sdr-source@dx-r2` before
+  `rx_sdr` and restarts it after (+ cleanup trap); added a NOPASSWD sudoers grant
+  for `radio` → start/stop/restart `sdr-source@dx-r2` (visudo-validated).
+- **Validated:** 12s test capture as `radio` → `rx_sdr` acquired the dx-R2 (44 MB
+  IQ), decode no-sync as expected (no sat overhead), source + .84 FM recovered.
+  Scheduler armed (DRY_RUN=0, next_pass registered), TLE 59051 cached (~17h old).
+- **Post-pass:** .84 `sdr-fm@active` self-heals onto the fresh source via
+  `Restart=always` + `fm-watch.timer` (~1–2 min FM gap). Listener-skip gate: 4 AM
+  local, ~0 human listeners → capture proceeds. Capture is now gated only on the
+  physical antenna/LNA + a satellite actually being heard.
+
 ## 2026-06-14 (later) — rack UI deploy + single-station stereo attempt (mono kept)
 
 **State: V2 FM still LIVE on .84, MONO. radio.rg2.io UI now current (viz+bitrate).
