@@ -66,9 +66,22 @@ radio.rg2.io; web-UI delete fixed.**
     risk to `sdr-source@rtl-2838`; localhost-only, no consumer (readonly UI uses
     the .83 bridge). sdr-source@rtl-2838 unaffected.
   - `scanner-ui` (:8081) = the **p25.rg2.io** readonly archive backend → KEEP.
-  - `scanner-transcribe`: V1 leftover, **dead input** (SDRTrunk recordings frozen
-    Jun 10, SDRTrunk not running) yet **burning 32% CPU** spin-polling. Retire
-    candidate (archive stays on p25.rg2.io via scanner-ui). [pending user OK]
+  - `scanner-transcribe`: was a V1 leftover with a **dead input** (SDRTrunk
+    recordings frozen Jun 10) yet **burning 32% CPU** (`call_watch_loop` rglob'ing
+    the 56k-file dir every 5 s). **RETIRED on the Pi and MOVED to the rack (.83).**
+- **scanner-transcribe now runs on .83 (rack).** Monitor-mode only
+  (`TRANSCRIBE_ALWAYS=true` → captions the live op25 `/ems.mp3` via
+  faster-whisper at `gti-ai.srvr:8088`; `EMS_RECORDINGS_DIR` → nonexistent path so
+  the SDRTrunk call-loop stays a no-op = no CPU spin: **0% CPU** on .83 vs 32% on
+  the Pi). App = `/opt/scanner-compute/transcribe.py` (shared V1 file, now in
+  scanner `v2/deploy.sh`); unit + `transcribe.env` baked into the scanner-compute
+  provisioner (new sensitive `whisper_token` var, keep-if-absent env, in tfvars on
+  thebeast). Output: `/var/lib/scanner-compute/transcripts/*.jsonl` + live
+  `/run/scanner/transcribe.json`. Validated live (real EMS captions decoding).
+  **FOLLOW-UP:** nothing surfaces these yet on the rack — `v2/scanner_api.py` has
+  a `transcript` field it doesn't populate, and `p25.rg2.io` (Pi scanner-ui) reads
+  the *Pi's* transcripts dir, not .83's. Wire scanner-api to serve the .83
+  transcripts/caption-state to surface EMS captions on ems.rg2.io.
 
 ## 2026-06-14 (later still) — wxsat made V2-ready for the 09:24Z Meteor pass
 

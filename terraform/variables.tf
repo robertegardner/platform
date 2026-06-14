@@ -100,6 +100,13 @@ variable "icecast_source_password" {
   sensitive   = true
 }
 
+variable "whisper_token" {
+  description = "Bearer token for the remote faster-whisper host (scanner EMS transcription; same token as the radio captions). Empty leaves transcribe.env for manual fill (it is keep-if-absent)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "icecast_admin_password" {
   description = "Icecast admin UI password"
   type        = string

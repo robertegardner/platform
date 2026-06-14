@@ -83,6 +83,33 @@ EOF
   chmod 0600 /etc/scanner-compute/icecast.env
 fi
 
+echo "==> EMS transcription env (written-if-absent; carries the whisper token)"
+# Captions the live rack op25 /ems.mp3 via the remote faster-whisper host
+# (TRANSCRIBE_ALWAYS monitor mode). Keep-if-absent so a re-apply never clobbers a
+# hand-set token. EMS_RECORDINGS_DIR points at a nonexistent path on purpose:
+# op25 has no per-call recordings (that was SDRTrunk's job on the V1 Pi), so the
+# call-watch loop must stay a no-op — pointing it at a real dir is what spun the
+# Pi's CPU to 32%.
+if [ -f /etc/scanner-compute/transcribe.env ]; then
+  echo "    transcribe.env exists - keeping it"
+else
+  cat > /etc/scanner-compute/transcribe.env <<'EOF'
+TRANSCRIBE_ENABLED=true
+WHISPER_URL=http://gti-ai.srvr:8088
+WHISPER_TOKEN=${whisper_token}
+TRANSCRIBE_ALWAYS=true
+TRANSCRIBE_MONITOR_URL=http://${icecast_host}:${icecast_port}/ems.mp3
+TRANSCRIBE_CONTEXT=MOSWIN P25
+TRANSCRIBE_WINDOW_SEC=8
+TRANSCRIPTS_DIR=/var/lib/scanner-compute/transcripts
+TRANSCRIBE_STATE_PATH=/run/scanner/transcribe.json
+EMS_RECORDINGS_DIR=/var/lib/scanner-compute/_no_call_recordings
+EOF
+  chmod 0640 /etc/scanner-compute/transcribe.env
+  chown root:scanner /etc/scanner-compute/transcribe.env
+fi
+install -d -o scanner -g scanner /var/lib/scanner-compute/transcripts
+
 echo "==> op25 (boatbod) build-if-absent — slow on first run"
 # Marker v2: set only after the installed python module imports (the first
 # 2026-06-10 build configured before python3-setuptools was present, so cmake's
@@ -264,6 +291,32 @@ EnvironmentFile=/etc/scanner-compute/scanner-api.env
 ExecStart=/usr/bin/python3 /opt/scanner-compute/scanner_api.py
 Restart=always
 RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# EMS transcription orchestrator (Whisper captions of the live /ems.mp3). App
+# CODE (transcribe.py) comes from the scanner repo's v2/deploy.sh (two-cadence);
+# this lays down only the unit. Monitor-only on the rack (no SDRTrunk recordings).
+cat > /etc/systemd/system/scanner-transcribe.service <<'EOF'
+[Unit]
+Description=Scanner transcription orchestrator (Whisper captions of the rack op25 /ems.mp3)
+After=network-online.target ems-stream.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=scanner
+Group=scanner
+WorkingDirectory=/opt/scanner-compute
+EnvironmentFile=/etc/scanner-compute/transcribe.env
+RuntimeDirectory=scanner
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/python3 /opt/scanner-compute/transcribe.py
+Restart=always
+RestartSec=10s
 
 [Install]
 WantedBy=multi-user.target

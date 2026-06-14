@@ -76,6 +76,7 @@ module "scanner_compute" {
   devices                 = local.scanner_devices
   icecast_host            = var.distribution_ip
   icecast_source_password = var.icecast_source_password
+  whisper_token           = var.whisper_token
 }
 
 module "radio_compute" {

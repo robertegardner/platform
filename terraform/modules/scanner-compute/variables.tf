@@ -81,3 +81,10 @@ variable "icecast_source_password" {
   type        = string
   sensitive   = true
 }
+
+variable "whisper_token" {
+  description = "Bearer token for the remote faster-whisper host (EMS transcription). Empty leaves transcribe.env for manual fill (keep-if-absent)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
