@@ -55,12 +55,20 @@ radio.rg2.io; web-UI delete fixed.**
   UI settings save (bitrate, site title) silently 500'd. Fixed live
   (`chown root:radio` + `chmod 0775`, matching the Pi) and in the radio-compute
   provisioner so it's re-provision-safe.
-- **Cleanup pass:** Pi `icecast2` **RETIRED** (stopped + disabled; SysV service,
+- **Cleanup pass.** Pi `icecast2` **RETIRED** (stopped + disabled; SysV service,
   so `disable --now` only removed boot symlinks — needed an explicit
   `systemctl stop`). Was idle (0 inbound clients); fm/ems/public audio unaffected.
-  **Found:** Pi
-  `scanner-transcribe.service` still enabled+running (V1 remnant pulling
-  .82/ems.mp3 → Whisper) — flag for scanner-domain cleanup, not touched.
+- **Pi V1 scanner stack triaged.** The `scanner` user runs 3 python procs:
+  `scheduler.py` (scanner-scheduler, :8082), `app.py` (scanner-ui, :8081),
+  `transcribe.py` (scanner-transcribe). 
+  - `scanner-scheduler` **RETIRED** (disable --now): idle since boot but running
+    the *retired* satellite-preemption pyorbital loop + the latent MOSWIN USB-reset
+    risk to `sdr-source@rtl-2838`; localhost-only, no consumer (readonly UI uses
+    the .83 bridge). sdr-source@rtl-2838 unaffected.
+  - `scanner-ui` (:8081) = the **p25.rg2.io** readonly archive backend → KEEP.
+  - `scanner-transcribe`: V1 leftover, **dead input** (SDRTrunk recordings frozen
+    Jun 10, SDRTrunk not running) yet **burning 32% CPU** spin-polling. Retire
+    candidate (archive stays on p25.rg2.io via scanner-ui). [pending user OK]
 
 ## 2026-06-14 (later still) — wxsat made V2-ready for the 09:24Z Meteor pass
 
