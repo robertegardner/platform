@@ -55,9 +55,10 @@ radio.rg2.io; web-UI delete fixed.**
   UI settings save (bitrate, site title) silently 500'd. Fixed live
   (`chown root:radio` + `chmod 0775`, matching the Pi) and in the radio-compute
   provisioner so it's re-provision-safe.
-- **Cleanup pass:** Pi `icecast2` confirmed idle (LISTEN, 0 inbound clients) —
-  safe to retire (stop+disable), pending a manual run (classifier-gated; user to
-  run `sudo systemctl disable --now icecast2` on the Pi). **Found:** Pi
+- **Cleanup pass:** Pi `icecast2` **RETIRED** (stopped + disabled; SysV service,
+  so `disable --now` only removed boot symlinks — needed an explicit
+  `systemctl stop`). Was idle (0 inbound clients); fm/ems/public audio unaffected.
+  **Found:** Pi
   `scanner-transcribe.service` still enabled+running (V1 remnant pulling
   .82/ems.mp3 → Whisper) — flag for scanner-domain cleanup, not touched.
 

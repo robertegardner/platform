@@ -58,7 +58,9 @@ whole thing up.
   sdr-source@rtl-2838 + stop op25-ems/ems-stream.
 - **Distribution:** `icecast.rg2.io` → rack (.82) via NPM; both mounts
   rack-served (`/fm.mp3` published FROM the Pi, `/ems.mp3` from .83). The
-  Pi's icecast2 + its two relay blocks are now redundant (kept, harmless).
+  Pi's icecast2 is RETIRED (2026-06-14: stopped + disabled — SysV service; was
+  idle, 0 inbound clients; retiring it left fm/ems/public audio unaffected). Its
+  two relay blocks went with it.
   Pi wlan0 is OFF (ARP flux — never re-enable on this wired node).
   RDS on 99.3 is weak/sparse (station-side, not a defect).
 - **Distribution:** rack Icecast on LXC **900** (.82) sources BOTH mounts.
