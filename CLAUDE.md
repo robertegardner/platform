@@ -276,9 +276,11 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   `/api/wxsat/*` call to the Pi via `WXSAT_UPSTREAM=http://radio.srvr:8080`
   (radio repo 2026-06-14). Keep the Pi sdr-tuner running.)
 - `ems.rg2.io` → **192.168.6.83:8081** (scanner-api bridge — the Android
-  app's scanner backend; deployed from the scanner repo). NEVER point it at
-  the Pi's old scheduler — its MOSWIN job USB-resets the dongle out from
-  under sdr-source@rtl-2838.
+  app's scanner backend; deployed from the scanner repo). Also serves a human
+  **EMS captions UI at `/`** (live caption + transcript log from
+  scanner-transcribe, via `/api/transcribe` + `/api/transcript`); JSON service
+  descriptor moved to `/api`. NEVER point it at the Pi's old scheduler — its
+  MOSWIN job USB-resets the dongle out from under sdr-source@rtl-2838.
 - `p25.rg2.io` → radio.srvr:8081 (the V1 scanner UI in READ-ONLY mode:
   /listen plays the live op25 feed with captions + the V1 archive pages.
   `SCANNER_UI_READONLY=true` makes it proxy the .83 bridge — it cannot

@@ -78,6 +78,10 @@ radio.rg2.io; web-UI delete fixed.**
   provisioner (new sensitive `whisper_token` var, keep-if-absent env, in tfvars on
   thebeast). Output: `/var/lib/scanner-compute/transcripts/*.jsonl` + live
   `/run/scanner/transcribe.json`. Validated live (real EMS captions decoding).
+- **EMS captions UI live at ems.rg2.io/ (DONE).** scanner-api now serves a
+  minimal stdlib HTML page at `/` (live caption banner + scrolling transcript log
+  + inline /ems.mp3 player), polling /api/transcribe + /api/transcript; the JSON
+  service descriptor moved to `/api`. (scanner repo `c14f822`.)
 - **scanner-api now serves the EMS transcripts (DONE).** Added two stdlib
   endpoints to `v2/scanner_api.py` matching the V1 contract exactly:
   `GET /api/transcribe` → live caption from `/run/scanner/transcribe.json`;
