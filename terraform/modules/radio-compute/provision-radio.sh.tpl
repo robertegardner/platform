@@ -179,6 +179,8 @@ FREQ=99.3M
 SAMP=200000
 GAIN=30
 BITRATE=256k
+STEREO=1
+ANTENNA="Antenna A"
 MOUNT=fm.mp3
 ICECAST_PASS=${icecast_source_password}
 EOF
@@ -233,25 +235,31 @@ ICECAST_URL="icecast://source:$ICECAST_PASS@${icecast_host}:${icecast_port}/$MOU
 : > /run/sdr-streams/now_playing.json
 
 if [[ "$MODE" == "wbfm" || "$MODE" == "fm" ]]; then
-  # wbfm_stream.py (deployed from the radio repo alongside am_stream.py) reads IQ
-  # via SoapySDR directly and emits 250k s16le MPX. The tee feeds redsea (RDS) the
-  # mono MPX; stereo_decode.py runs the FM stereo matrix (L+R / L-R via squared-
-  # pilot coherent detection with hardened carrier recovery — EMA carrier amp +
-  # crest clamp + ramped honesty gate, so a noisy pilot degrades to mono without
-  # clicks) and emits f32le 2-channel; ffmpeg does per-channel 75us de-emphasis +
-  # 15k lowpass + a no-auto-level limiter and encodes stereo MP3. --pilot-floor
-  # 0.0015 is calibrated for the wbfm MPX scale (clean pilot ~0.0047); --scale 2.0
-  # matches the old mono loudness. Live A/B'd clean on 100.7 (RDS intact, no clip).
-  # REVERT TO MONO: cp /opt/sdr-tuner/stream.sh.mono.bak /opt/sdr-tuner/stream.sh
-  # && systemctl restart sdr-fm@active (the 1-channel ffmpeg, no stereo_decode).
-  exec bash -c "python3 /opt/sdr-tuner/wbfm_stream.py | \
-    tee >(redsea -r 250000 --output json 2>/dev/null | FREQ='$FREQ' /opt/sdr-tuner/rds_watcher.py) | \
-    python3 /opt/sdr-tuner/stereo_decode.py --in-format s16le --out-format f32le --scale 2.0 --pilot-floor 0.0015 | \
-    ffmpeg -hide_banner -loglevel warning -f f32le -ar 250000 -ac 2 -i - \
-           -af 'aemphasis=mode=reproduction:type=75fm,lowpass=15000,alimiter=level=false' \
-           -ar 48000 -ac 2 \
-           -c:a libmp3lame -b:a $BITRATE -content_type audio/mpeg \
-           -f mp3 '$ICECAST_URL'"
+  # wbfm_stream.py reads IQ via SoapySDR directly (channel-select 2-stage; reads
+  # FREQ/GAIN/ANTENNA from active.env) and emits 250k s16le MPX. The tee feeds
+  # redsea (RDS). STEREO=0 (UI mono toggle) -> a clean mono encode that SKIPS
+  # stereo_decode entirely (no noisy 38 kHz L-R subcarrier — best for weak/talk).
+  # STEREO=1 -> stereo_decode matrix (hardened carrier recovery: EMA amp + crest
+  # clamp + ramped honesty gate). --scale 2.0 / --pilot-floor 0.0015 match the MPX
+  # scale + old mono loudness. ffmpeg does per-channel 75us de-emphasis + 15k LP.
+  if [[ "$${STEREO:-1}" == "0" ]]; then
+    exec bash -c "python3 /opt/sdr-tuner/wbfm_stream.py | \
+      tee >(redsea -r 250000 --output json 2>/dev/null | FREQ='$FREQ' /opt/sdr-tuner/rds_watcher.py) | \
+      ffmpeg -hide_banner -loglevel warning -f s16le -ar 250000 -ac 1 -i - \
+             -af 'aemphasis=mode=reproduction:type=75fm,lowpass=15000' \
+             -ar 48000 -ac 1 \
+             -c:a libmp3lame -b:a $BITRATE -content_type audio/mpeg \
+             -f mp3 '$ICECAST_URL'"
+  else
+    exec bash -c "python3 /opt/sdr-tuner/wbfm_stream.py | \
+      tee >(redsea -r 250000 --output json 2>/dev/null | FREQ='$FREQ' /opt/sdr-tuner/rds_watcher.py) | \
+      python3 /opt/sdr-tuner/stereo_decode.py --in-format s16le --out-format f32le --scale 2.0 --pilot-floor 0.0015 | \
+      ffmpeg -hide_banner -loglevel warning -f f32le -ar 250000 -ac 2 -i - \
+             -af 'aemphasis=mode=reproduction:type=75fm,lowpass=15000,alimiter=level=false' \
+             -ar 48000 -ac 2 \
+             -c:a libmp3lame -b:a $BITRATE -content_type audio/mpeg \
+             -f mp3 '$ICECAST_URL'"
+  fi
 else
   echo "MODE=$MODE not supported on radio-compute yet (HD/AM are radio-repo v2 work)" >&2
   exit 78
@@ -263,7 +271,7 @@ fi
 
 echo "==> sudoers: the tuner UI may control sdr-fm@active"
 cat > /etc/sudoers.d/radio-tuner <<'EOF'
-radio ALL=(root) NOPASSWD: /usr/bin/systemctl start sdr-fm@active, /usr/bin/systemctl stop sdr-fm@active, /usr/bin/systemctl restart sdr-fm@active
+radio ALL=(root) NOPASSWD: /usr/bin/systemctl start sdr-fm@active, /usr/bin/systemctl stop sdr-fm@active, /usr/bin/systemctl restart sdr-fm@active, /usr/bin/systemctl start sdr-scan.service, /usr/bin/systemctl stop sdr-scan.service, /usr/bin/systemctl start sdr-am-scan.service, /usr/bin/systemctl stop sdr-am-scan.service
 EOF
 chmod 0440 /etc/sudoers.d/radio-tuner
 
@@ -387,6 +395,48 @@ EOF
 systemctl daemon-reload
 systemctl enable fm-watch.timer >/dev/null 2>&1 || true
 systemctl start fm-watch.timer || true
+
+echo "==> band-scan units (oneshot; the tuner admin page triggers these)"
+# fm_scan.py / am_scan.py open the dx-R2 REMOTELY (driver=remote from
+# source-dx-r2.env) and write stations.json / stations_am.json. The dx-R2 is
+# single-client, so a scan must take it from the live FM: stop fm-watch + FM
+# first, restore both after (ExecStopPost runs on success OR failure, so FM
+# always comes back even if the scan errors). The +prefix runs those systemctl
+# calls as root regardless of User=radio. ~1–2 min FM interruption per FM scan.
+cat > /etc/systemd/system/sdr-scan.service <<'EOF'
+[Unit]
+Description=FM band scan (writes stations.json; interrupts FM for the sweep)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=radio
+Group=radio
+TimeoutStartSec=300
+ExecStartPre=+/usr/bin/systemctl stop fm-watch.timer
+ExecStartPre=+/usr/bin/systemctl stop sdr-fm@active
+ExecStart=/usr/bin/python3 /opt/sdr-tuner/fm_scan.py
+ExecStopPost=+/usr/bin/systemctl start sdr-fm@active
+ExecStopPost=+/usr/bin/systemctl start fm-watch.timer
+EOF
+
+cat > /etc/systemd/system/sdr-am-scan.service <<'EOF'
+[Unit]
+Description=AM band scan (writes stations_am.json; interrupts FM for the sweep)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=radio
+Group=radio
+TimeoutStartSec=300
+ExecStartPre=+/usr/bin/systemctl stop fm-watch.timer
+ExecStartPre=+/usr/bin/systemctl stop sdr-fm@active
+ExecStart=/usr/bin/python3 /opt/sdr-tuner/am_scan.py
+ExecStopPost=+/usr/bin/systemctl start sdr-fm@active
+ExecStopPost=+/usr/bin/systemctl start fm-watch.timer
+EOF
+systemctl daemon-reload
 
 echo "==> provisioning complete (toolchain staged; no units, nothing started)"
 echo "    csdr=$(command -v csdr || echo missing) nrsc5=$(command -v nrsc5 || echo missing) satdump=$(command -v satdump || echo missing)"
