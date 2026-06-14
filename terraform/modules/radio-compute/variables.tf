@@ -70,6 +70,11 @@ variable "icecast_host" {
   type        = string
 }
 
+variable "pi_host" {
+  description = "Acquisition Pi host (resolves from this LXC) — the rack tuner proxies wxsat (Pi-side captures) to its UI on :8080"
+  type        = string
+}
+
 variable "icecast_port" {
   description = "Rack Icecast port"
   type        = number

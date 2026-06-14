@@ -127,6 +127,7 @@ locals {
     icecast_host            = var.icecast_host
     icecast_port            = var.icecast_port
     icecast_source_password = var.icecast_source_password
+    pi_host                 = var.pi_host
   })
 }
 

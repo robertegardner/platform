@@ -187,9 +187,19 @@ else
   cat > /etc/sdr-streams/tuner.env <<'EOF'
 # Used by the sdr-tuner UI to rewrite active.env when you tune a station.
 ICECAST_PASS=${icecast_source_password}
+# wxsat captures live only on the Pi (the scheduler needs the SDR). The rack
+# tuner proxies every /api/wxsat/* call here so radio.rg2.io shows the gallery.
+WXSAT_UPSTREAM=http://${pi_host}:8080
 EOF
   chown radio:radio /etc/sdr-streams/tuner.env
   chmod 0600 /etc/sdr-streams/tuner.env
+fi
+
+# tuner.env is keep-if-exists, so existing installs predate WXSAT_UPSTREAM —
+# ensure the line is present (idempotent) so the wxsat gallery proxies to the Pi.
+if ! grep -q '^WXSAT_UPSTREAM=' /etc/sdr-streams/tuner.env; then
+  echo "WXSAT_UPSTREAM=http://${pi_host}:8080" >> /etc/sdr-streams/tuner.env
+  echo "    tuner.env: added WXSAT_UPSTREAM (wxsat proxy to Pi)"
 fi
 
 if [ -f /opt/sdr-tuner/stream.sh ]; then

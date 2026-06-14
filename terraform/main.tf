@@ -96,4 +96,5 @@ module "radio_compute" {
   devices                 = local.radio_devices
   icecast_host            = var.distribution_ip
   icecast_source_password = var.icecast_source_password
+  pi_host                 = var.pi_host
 }
