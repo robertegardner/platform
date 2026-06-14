@@ -6,8 +6,28 @@ Working notes per session, newest first. Full detail lives in
 
 ## 2026-06-14 (latest) — wxsat UI fix (proxy + delete), V2 cleanup pass
 
-**State: V2 FM still LIVE on .84 (mono, now 256k). wxsat web UI now works on
-radio.rg2.io; web-UI delete fixed. Starting stereo round 2.**
+**State: V2 FM LIVE on .84, now STEREO + 256k. wxsat web UI now works on
+radio.rg2.io; web-UI delete fixed.**
+
+- **Stereo round 2 — SHIPPED (now the rack default).** Round-1 clicks were the
+  38 kHz carrier recovery, not clipping: per-block RMS normalize stepped the
+  carrier scale at block boundaries on a noisy pilot, and the normalized crest
+  spiked to 3-4x → those transients hit L-R. Fix (radio repo `8d31428`): EMA
+  carrier amplitude across blocks (--carrier-alpha), clamp the crest
+  (--carrier-clamp 1.3), ramp the honesty-gate blend within the block. Offline
+  A/B (decode_lib harness on /tmp/mpx.s16): identical to round-1 on a clean dump,
+  12x fewer click transients on a buried-pilot stress case. Live A/B'd on 100.7:
+  clean, RDS intact (PI 0x211E), no clip (peak 0.11), clamp fires ~0.01% (carrier
+  clean). **Pilot-floor recalibrated 0.003 -> 0.0015** for the wbfm MPX scale
+  (clean pilot ~0.0047; the 0.003 floor was carried over from the csdr path and
+  was suppressing stereo to blend 0.29 / -37 dB). Now blend 1.0, separation
+  -26.8 dB live (-23 dB content ceiling — modest but real; this station/reception
+  just isn't very stereo). scale=2.0 for mono loudness parity. Baked into the
+  radio-compute provisioner stream.sh + deploy.sh --rack now installs
+  stereo_decode.py. **Revert to mono:** `cp /opt/sdr-tuner/stream.sh.mono.bak
+  /opt/sdr-tuner/stream.sh && systemctl restart sdr-fm@active` on .84.
+- **NOTE:** .84 load avg ~9 on 4 cores (steady, pre-dates stereo — not caused by
+  the stereo pipeline, which adds ~0 measurable CPU). Worth a separate look.
 
 - **wxsat UI was empty on radio.rg2.io.** Root cause: the V2 cutover repointed
   radio.rg2.io→.84, but wxsat captures live ONLY on the Pi (scheduler needs the

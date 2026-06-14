@@ -234,14 +234,22 @@ ICECAST_URL="icecast://source:$ICECAST_PASS@${icecast_host}:${icecast_port}/$MOU
 
 if [[ "$MODE" == "wbfm" || "$MODE" == "fm" ]]; then
   # wbfm_stream.py (deployed from the radio repo alongside am_stream.py) reads IQ
-  # via SoapySDR directly and emits the same 250k s16le MPX rx_fm did, so the
-  # tee->redsea(RDS)+ffmpeg chain below is unchanged. It reads device/tune from
-  # active.env + source-dx-r2.env itself.
+  # via SoapySDR directly and emits 250k s16le MPX. The tee feeds redsea (RDS) the
+  # mono MPX; stereo_decode.py runs the FM stereo matrix (L+R / L-R via squared-
+  # pilot coherent detection with hardened carrier recovery — EMA carrier amp +
+  # crest clamp + ramped honesty gate, so a noisy pilot degrades to mono without
+  # clicks) and emits f32le 2-channel; ffmpeg does per-channel 75us de-emphasis +
+  # 15k lowpass + a no-auto-level limiter and encodes stereo MP3. --pilot-floor
+  # 0.0015 is calibrated for the wbfm MPX scale (clean pilot ~0.0047); --scale 2.0
+  # matches the old mono loudness. Live A/B'd clean on 100.7 (RDS intact, no clip).
+  # REVERT TO MONO: cp /opt/sdr-tuner/stream.sh.mono.bak /opt/sdr-tuner/stream.sh
+  # && systemctl restart sdr-fm@active (the 1-channel ffmpeg, no stereo_decode).
   exec bash -c "python3 /opt/sdr-tuner/wbfm_stream.py | \
     tee >(redsea -r 250000 --output json 2>/dev/null | FREQ='$FREQ' /opt/sdr-tuner/rds_watcher.py) | \
-    ffmpeg -hide_banner -loglevel warning -f s16le -ar 250000 -ac 1 -i - \
-           -af 'aemphasis=mode=reproduction:type=75fm,lowpass=15000' \
-           -ar 48000 -ac 1 \
+    python3 /opt/sdr-tuner/stereo_decode.py --in-format s16le --out-format f32le --scale 2.0 --pilot-floor 0.0015 | \
+    ffmpeg -hide_banner -loglevel warning -f f32le -ar 250000 -ac 2 -i - \
+           -af 'aemphasis=mode=reproduction:type=75fm,lowpass=15000,alimiter=level=false' \
+           -ar 48000 -ac 2 \
            -c:a libmp3lame -b:a $BITRATE -content_type audio/mpeg \
            -f mp3 '$ICECAST_URL'"
 else
