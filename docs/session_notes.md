@@ -4,6 +4,53 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
+## 2026-06-14 — V2 RADIO CUT OVER (for real): the bug was rx_fm, NOT UDP
+
+**State: V2 radio LIVE on .84 via `wbfm_stream.py` over the remote dx-R2 (lossless
+TCP). Clean audio + rich RDS confirmed by the user. radio.rg2.io → .84:8080. The
+Pi is a pure acquisition node again (sdr-fm@active masked, sdr-source@dx-r2
+enabled). The 2026-06-13 root-cause ("UDP IQ loss garbles FM") was WRONG.**
+
+- **Re-diagnosed from scratch in attended windows.** Brought V2 up on the live
+  /fm.mp3 over the committed TCP fix (b9049c5): user heard the SAME garble, RDS
+  dead — but the IQ socket was provably **TCP** (ss: ESTAB, zero UDP to .84).
+  So TCP-lossless did NOT fix it ⇒ UDP was never the (whole) cause.
+- **Isolation chain that found the real bug:**
+  1. `capture-iq.py --prot tcp --dump` (full-speed consumer, no tee) → 240 MB IQ,
+     0 overflow/0 timeout, CLEAN.
+  2. Wrote `tools/demod-iq.py` (numpy WBFM, no scipy) and demodded that dump
+     offline → **336 RDS groups**. So the TCP IQ itself is perfect.
+  3. First hypothesis was live-pipeline backpressure (tee→redsea stalling rx_fm →
+     server-side overflow). Added mbuffer decoupling to stream.sh → **still no
+     RDS**. Hypothesis wrong.
+  4. Decisive test: `rx_fm`(remote,TCP) → redsea **direct** (no tee/ffmpeg/mbuffer)
+     → **0 RDS groups**. Same IQ, my demod gets 336, rx_fm gets 0 ⇒ **rx_fm itself
+     mangles the SoapyRemote stream** (mishandles the ~1006-sample MTU partial
+     reads → broken FM demod continuity → clicks + dead RDS). Exactly why
+     am_stream.py already replaced rx_fm for AM.
+- **Fix = `wbfm_stream.py`** (radio repo `files/opt/sdr-tuner/`, commit 8157efe):
+  a SoapySDR WBFM+RDS client (capture-iq's stream setup + demod-iq's proven demod)
+  that reads IQ directly, accumulates reads phase-continuously, emits the same
+  250k s16le MPX rx_fm did — drop-in for the tee→redsea/ffmpeg chain. Forces
+  remote:prot=tcp. Bench: `wbfm_stream.py | redsea` direct → rich RDS
+  (PI 0x211E / PS KGMO); full stream → now_playing populated; retune 100.7↔99.3
+  cycle good; user listen = CLEAN.
+- **Cutover executed** (attended, dead-man armed each window): .84
+  `sdr-fm@active`(enabled)+`sdr-tuner`+`sdr-captions`+`fm-watch.timer` up; Pi
+  `sdr-fm@active` masked, `sdr-source@dx-r2` enabled+active, `pi-fm-watch.timer`
+  + `sdr-captions` disabled. NPM `radio.rg2.io` → 192.168.6.84:8080. Verified:
+  public UI 200 + now_playing/lyrics, /fm.mp3 200, RDS fresh, captions writing.
+- **Lessons:** RDS is the cheap pass/fail (audio-level/astats can't see garble).
+  "Clean transport" (0 overflow/timeout) is necessary-but-not-sufficient AND can
+  be measured on a path the live client still wrecks — always A/B the actual
+  client vs a known-good demod. rx_fm is unfit as a SoapyRemote streaming client.
+- **Open/non-blocking:** stream is 128k mono (V1 was 256k — bump via UI
+  /api/bitrate if wanted); rx_fm build + RX_STREAM_ARGS patch kept in the
+  provisioner but now unused by the FM path; mbuffer was apt-installed on .84
+  during diagnosis (harmless leftover, not used by the final stream.sh); the
+  Pi's orphaned sdr-tuner (radio.rg2.io no longer points at it) can be cleaned
+  up; Android-app no-audio is a separate pre-existing issue.
+
 ## 2026-06-13 (evening) — Radio-domain antenna triage (wxsat fail + dead AM); two physical fixes pending
 
 **State: still V1-hybrid. No code or deploy changes — two physical-layer antenna

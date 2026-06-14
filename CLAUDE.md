@@ -9,26 +9,28 @@ lives in the sibling repos `radio` (v2) and `scanner` (v2); this repo owns the
 device registry, the source/mount contracts, and the Terraform that stands the
 whole thing up.
 
-## Current state (2026-06-13: V2 cutover ATTEMPTED then ROLLED BACK — FM is V1-hybrid again)
+## Current state (2026-06-14: V2 RADIO LIVE — wbfm_stream.py over remote dx-R2/TCP)
 
 - **Attic link (2026-06-13): RESOLVED at gigabit (user). New port + cable on
   the Attic Camera Flex switch → eth0 1000FDX, autoneg ON, stable (0 new flaps
   over a ~6 h window incl. warm afternoon). The 100FDX force is gone. The user
   also moved the switch's uplink to a 2.5G port (10GE-capable, links 2.5G; 10G
   planned w/ fiber), lifting the shared-uplink ceiling 1G→2.5G.**
-- **V2 RADIO CUTOVER ROLLED BACK (same day) — the IQ gate is NOT sufficient
-  for analog FM.** All gates passed (256M loss 0.0019%, 8 Msps IQ 120s 0/0/255
-  Mbps, 14-min soak clean) and FM cut over to .84, BUT users heard **garbled,
-  unlistenable** FM. ROOT CAUSE: SoapyRemote streams IQ over **UDP**; even tiny
-  packet loss (~9 clicks/s in the spectrogram) destroys analog FM demod
-  continuity — and **kills RDS** (dead on V2, decodes cleanly on V1: the
-  sensitive tell). The IQ gate only counts overflow/timeout, NOT UDP sample
-  loss, so it passed while FM was wrecked. P25/CU8 survives (digital/FEC). Rolled
-  back to V1-hybrid; web audio + RDS confirmed clean by the user.
-  **V2 retry needs a LOSSLESS IQ transport (force SoapyRemote `remote:prot=tcp`)
-  — but rx_fm does NOT forward that stream arg, so it needs a stream-arg-capable
-  client (or a SoapyRemote-level config), verified on the bench with RDS decode +
-  a listen BEFORE re-cutover.** Do not re-attempt V2 on UDP.
+- **V2 RADIO CUT OVER 2026-06-14 — the 2026-06-13 root cause was WRONG.** The
+  garble was NOT UDP packet loss: with the IQ forced onto **TCP** (provably — ss
+  showed ESTAB/zero-UDP) FM was STILL garbled with dead RDS. Re-diagnosis (see
+  session_notes 2026-06-14): the same TCP IQ, captured backpressure-free and
+  demodded offline (`tools/demod-iq.py`), gave **336 RDS groups** — perfect. The
+  bug is **`rx_fm` itself**: it mishandles SoapyRemote's small MTU-sized partial
+  reads (~1006 samples/datagram), breaking FM demod continuity → clicks + dead
+  RDS. (Same reason `am_stream.py` already replaced rx_fm for AM.) FIX =
+  **`wbfm_stream.py`** (radio repo `files/opt/sdr-tuner/`): a SoapySDR WBFM+RDS
+  client that reads IQ directly (phase-continuous), emits the same 250k MPX, and
+  forces `remote:prot=tcp`. Bench-proven (rich RDS PI 0x211E / PS KGMO, clean
+  audio, retune cycle) then cut over; user confirmed clean. **Lesson: a "clean
+  transport" gate (0 overflow/timeout) is necessary-but-NOT-sufficient and can
+  pass on a path the live client still wrecks — A/B the real client vs a
+  known-good demod, and use RDS as the cheap pass/fail.**
 - **Distribution (.82) gained two services (2026-06-12, both in the
   distribution module):** `fm-duck` — talk-ducking relay `/fm.mp3` →
   `/fm-duck.mp3` for GUI-less streamers (WiiM), server-calibrated classifier,
@@ -38,14 +40,16 @@ whole thing up.
   icecast2 unless its config is freshly written. NOTE: fm-duck is a permanent
   /fm.mp3 listener — wxsat's skip-when-listening (radio repo) now queries the
   RACK and discounts it.
-- **RADIO = V1-hybrid (rolled back 2026-06-13 after the failed V2 cutover):**
-  FM DSP runs **on the Pi** (`sdr-fm@active` unmasked+enabled+active, local
-  `driver=sdrplay`, 100.7 KGMO), publishing to .82 Icecast; `sdr-source@dx-r2`
-  **disabled**; Pi `sdr-captions` + `pi-fm-watch.timer` re-enabled. .84 FM units
-  (`sdr-fm@active`, `sdr-tuner`, `sdr-captions`, `fm-watch.timer`) all disabled
-  (stay provisioned). `radio.rg2.io` → **radio.srvr:8080** (Pi tuner UI). Web
-  audio + RDS verified clean. **WHY rolled back:** see the V2-cutover note above
-  (UDP IQ loss garbles analog FM; needs a lossless/TCP transport before retry).
+- **RADIO = V2 (cut over 2026-06-14):** FM DSP runs **on .84** via
+  `wbfm_stream.py` (NOT rx_fm) against the remote dx-R2 over TCP, 100.7 KGMO →
+  .82 Icecast. .84 `sdr-fm@active`(enabled)+`sdr-tuner`+`sdr-captions`+
+  `fm-watch.timer` all active+enabled. Pi `sdr-fm@active` **masked** (unmask only
+  for rollback), `sdr-source@dx-r2` **enabled+active** (:55001), Pi
+  `pi-fm-watch.timer` + `sdr-captions` **disabled**. `radio.rg2.io` →
+  **192.168.6.84:8080**. Clean audio + rich RDS confirmed by the user. Rollback
+  path (R): .84 disable the FM units; Pi unmask+start `sdr-fm@active`, disable
+  `sdr-source@dx-r2`, re-enable `pi-fm-watch.timer`+`sdr-captions`; NPM
+  radio.rg2.io → radio.srvr:8080.
 - **P25 stays V2 on scanner-compute** (LXC **901**, .83): op25 on the interim
   `rtl-2838` (:55005, enabled at boot) → rack `/ems.mp3` — its 38 Mbps CU8
   survives the shared uplink acceptably. Interim-dark:
@@ -244,14 +248,12 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
    user)**. Both mounts rack-served.
 3. ✅ `scanner-compute` — op25 LIVE on the interim rtl-2838; `/ems.mp3`
    rack-sourced. Remaining: scanner v2 app work on Airspy R2 arrival.
-4. ⏸️ `radio-compute` — **V2 cutover ATTEMPTED 2026-06-13, ROLLED BACK** to
-   V1-hybrid. The 2.5G uplink + gigabit link fixed the OLD blocker (contention),
-   all gates passed, but FM was garbled on-air: **SoapyRemote IQ is UDP and
-   analog FM can't tolerate the packet loss** (RDS dead = the tell). Stays fully
-   provisioned on .84. **Unpause now = a LOSSLESS IQ transport** (force
-   `remote:prot=tcp`; rx_fm won't forward it → needs a stream-arg client or a
-   SoapyRemote config), bench-verified with RDS decode + a listen. THEN the
-   stereo mux (radio repo v2) targets .84.
+4. ✅ `radio-compute` — **V2 LIVE (cut over 2026-06-14).** FM DSP on .84 via
+   `wbfm_stream.py` over the remote dx-R2/TCP; radio.rg2.io → .84:8080. The
+   2026-06-13 attempt rolled back on a MISDIAGNOSIS (blamed UDP; the real bug was
+   rx_fm mangling SoapyRemote partial reads — fixed by the Python WBFM client).
+   Remaining: stereo mux + HD/AM rack-side (radio repo v2); optional 256k bitrate
+   bump.
 
 ## NPM proxy map (user-managed; TARGET state for the Android app — see
 ## deployment_notes "Android app integration")
@@ -259,10 +261,9 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
 - `icecast.rg2.io` → 192.168.6.82:8000 (rack Icecast — all public audio)
 - `scanner.rg2.io` → 192.168.6.83:8080 (op25 console; legacy page is the
   data-complete one under single-receiver rx.py)
-- `radio.rg2.io` → **radio.srvr:8080** (V1 tuner API+UI on the Pi — the Android
-  app's radio backend; repointed back here when the 2026-06-13 V2 cutover was
-  rolled back. Moves to .84:8080 only when V2 is re-attempted on a lossless IQ
-  transport)
+- `radio.rg2.io` → **192.168.6.84:8080** (V2 tuner API+UI on radio-compute — the
+  Android app's radio backend; repointed here at the 2026-06-14 V2 cutover. The
+  Pi's orphaned sdr-tuner can be cleaned up)
 - `ems.rg2.io` → **192.168.6.83:8081** (scanner-api bridge — the Android
   app's scanner backend; deployed from the scanner repo). NEVER point it at
   the Pi's old scheduler — its MOSWIN job USB-resets the dongle out from

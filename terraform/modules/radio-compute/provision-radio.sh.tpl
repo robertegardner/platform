@@ -75,8 +75,10 @@ else
 fi
 
 echo "==> rx_tools (build-if-absent)"
-# rx_fm — the V1 FM demodulator, SoapySDR-based, so the identical Pi chain
-# runs here against driver=remote. From rxseger/rx_tools.
+# rx_fm — kept for the toolchain (rx_power etc.), but NO LONGER the FM stream
+# client: it mishandles SoapyRemote's small partial reads and garbles remote FM,
+# so stream.sh uses wbfm_stream.py instead (see the wbfm branch below). From
+# rxseger/rx_tools.
 if command -v rx_fm >/dev/null 2>&1; then
   echo "    rx_fm already present - keeping it"
 else
@@ -202,10 +204,13 @@ set -euo pipefail
 source /etc/sdr-streams/active.env
 source /etc/radio-compute/source-dx-r2.env
 
-# Force the remote dx-R2 IQ stream onto lossless TCP. SoapyRemote's default UDP
-# firehose drops datagrams under uplink contention; analog FM turns each drop
-# into a click and RDS dies (the 2026-06-13 V2 rollback). rx_tools reads this in
-# verbose_setup_stream (local patch). No-op for non-remote drivers.
+# Force the remote dx-R2 IQ stream onto lossless TCP (wbfm_stream.py reads this;
+# SoapyRemote's default UDP firehose drops datagrams). The FM client is
+# wbfm_stream.py, NOT rx_fm: rx_fm mishandles SoapyRemote's small partial reads,
+# breaking FM demod continuity -> garbled FM + dead RDS. That — not the transport
+# — was the real cause of the 2026-06-13 V2 rollback (the same TCP IQ demods
+# cleanly with rich RDS through a proper SoapySDR client). Same fix pattern
+# am_stream.py already uses for AM.
 export RX_STREAM_ARGS=remote:prot=tcp
 
 ICECAST_URL="icecast://source:$ICECAST_PASS@${icecast_host}:${icecast_port}/$MOUNT"
@@ -213,7 +218,11 @@ ICECAST_URL="icecast://source:$ICECAST_PASS@${icecast_host}:${icecast_port}/$MOU
 : > /run/sdr-streams/now_playing.json
 
 if [[ "$MODE" == "wbfm" || "$MODE" == "fm" ]]; then
-  exec bash -c "rx_fm -d '$SOAPY_ARGS' -a 'Antenna A' -M fm -l 0 -A std -s 250000 -g $GAIN -f $FREQ -F 9 - | \
+  # wbfm_stream.py (deployed from the radio repo alongside am_stream.py) reads IQ
+  # via SoapySDR directly and emits the same 250k s16le MPX rx_fm did, so the
+  # tee->redsea(RDS)+ffmpeg chain below is unchanged. It reads device/tune from
+  # active.env + source-dx-r2.env itself.
+  exec bash -c "python3 /opt/sdr-tuner/wbfm_stream.py | \
     tee >(redsea -r 250000 --output json 2>/dev/null | FREQ='$FREQ' /opt/sdr-tuner/rds_watcher.py) | \
     ffmpeg -hide_banner -loglevel warning -f s16le -ar 250000 -ac 1 -i - \
            -af 'aemphasis=mode=reproduction:type=75fm,lowpass=15000' \

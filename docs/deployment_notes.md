@@ -194,6 +194,17 @@ from `icecast.rg2.io`. Plan of record: `~/.claude/plans/snug-swimming-dusk.md`.
 
 ## V2 radio RE-ROLLOUT runbook (planned 2026-06-11 morning, link healed)
 
+**DONE 2026-06-14 — V2 IS LIVE.** Executed steps 2/4–8 below, but the real
+blocker was NOT the transport (the 2026-06-13 "UDP garbles FM" call was wrong).
+Step 3's IQ gate (overflow/timeout) is necessary-but-NOT-sufficient: it passes on
+a TCP path the live `rx_fm` client still wrecks. The actual bug was **rx_fm**
+mishandling SoapyRemote partial reads → fixed by `wbfm_stream.py` (radio repo).
+**The REAL gate (use this on any future re-cutover): `wbfm_stream.py | redsea`
+direct decodes rich RDS + a human listen — RDS is the cheap pass/fail.** Full
+re-diagnosis story in session_notes 2026-06-14. State after cutover is recorded
+in CLAUDE.md "Current state"; ROLLBACK (R) below still applies (plus: V1 FM is
+now masked on the Pi — `systemctl unmask sdr-fm@active` first).
+
 GATE: overnight flap count on the Pi's eth0 = 0 (monitor armed; forced-1G +
 EEE root cause fixed 2026-06-11 ~00:00). Abort and revisit if any flaps.
 
