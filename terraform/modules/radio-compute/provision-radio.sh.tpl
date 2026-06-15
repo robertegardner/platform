@@ -260,8 +260,20 @@ if [[ "$MODE" == "wbfm" || "$MODE" == "fm" ]]; then
              -c:a libmp3lame -b:a $BITRATE -content_type audio/mpeg \
              -f mp3 '$ICECAST_URL'"
   fi
+elif [[ "$MODE" == "am" || "$MODE" == "nfm" ]]; then
+  # AM via am_stream.py: reads IQ from the remote dx-R2 (driver=remote, forced
+  # onto TCP), narrow 2-stage channel filter + FFT-locked synchronous demod,
+  # emits s16le mono @ 50k. Reads FREQ/GAIN/ANTENNA from active.env (ANTENNA
+  # defaults to the long-wire on Antenna C). No RDS on AM. ffmpeg trims the
+  # subsonics, telephone-bands the audio, and encodes mp3 to Icecast.
+  exec bash -c "python3 /opt/sdr-tuner/am_stream.py | \
+    ffmpeg -hide_banner -loglevel warning -f s16le -ar 50000 -ac 1 -i - \
+           -af 'highpass=f=50,lowpass=f=4800' \
+           -ar 48000 -ac 1 \
+           -c:a libmp3lame -b:a $BITRATE -content_type audio/mpeg \
+           -f mp3 '$ICECAST_URL'"
 else
-  echo "MODE=$MODE not supported on radio-compute yet (HD/AM are radio-repo v2 work)" >&2
+  echo "MODE=$MODE not supported on radio-compute yet (HD is radio-repo v2 work)" >&2
   exit 78
 fi
 EOF
