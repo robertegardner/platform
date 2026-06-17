@@ -62,7 +62,10 @@ variable "ssh_private_key_path" {
 
 variable "devices" {
   description = "Scanner-domain devices from the registry (present only) — drives the SoapyRemote client config"
-  type        = map(any)
+  # `any`, not map(any): registry device objects are heterogeneous, so map()
+  # coercion fails to unify them once more than one scanner device is present.
+  # The module only iterates with for/keys, which work on an object just as well.
+  type = any
 }
 
 variable "icecast_host" {

@@ -50,9 +50,16 @@ whole thing up.
   path (R): .84 disable the FM units; Pi unmask+start `sdr-fm@active`, disable
   `sdr-source@dx-r2`, re-enable `pi-fm-watch.timer`+`sdr-captions`; NPM
   radio.rg2.io → radio.srvr:8080.
-- **P25 stays V2 on scanner-compute** (LXC **901**, .83): op25 on the interim
-  `rtl-2838` (:55005, enabled at boot) → rack `/ems.mp3` — its 38 Mbps CU8
-  survives the shared uplink acceptably. Interim-dark:
+- **P25 on scanner-compute** (LXC **901**, .83): op25 targets the **Airspy R2**
+  (`airspy-r2` :55003, CS16 @ 2.5 Msps ~80 Mbps, enabled at boot) → rack
+  `/ems.mp3`. **Cut over from the interim `rtl-2838` 2026-06-16** when the user
+  moved the discone to the R2 and pulled the Nooelec. op25 gain is
+  **`LNA/MIX/VGA`** (Airspy elements — `TUNER:38` was R820T-only). **⚠ DECODE
+  BLOCKED 2026-06-16 (scanner DOWN, no rollback — RTL gone):** op25/gr-osmosdr
+  can't sustain the R2's 80 Mbps SoapyRemote stream (stalls ~128K samples; RF is
+  excellent, ~38 dB CC SNR via rx_sdr). Fix = a tight-loop IQ bridge → FIFO →
+  op25 `file=` source (à la `wbfm_stream.py`). See session_notes 2026-06-16.
+  Interim-dark:
   `/ems-{fire,police,interop}`, `/monitor.mp3`, EMS transcripts. Scanner
   rollback path (if ever needed): SCHEDULER_EMS_DEFAULT=true + disable
   sdr-source@rtl-2838 + stop op25-ems/ems-stream.
@@ -69,10 +76,15 @@ whole thing up.
   icecast.xml). NPM repoint to .82 is LAST — it retires the relays and the
   Pi's icecast2. (An early NPM repoint before the fm cutover 404'd the public
   radio — don't repoint until every mount is rack-sourced.)
-- **Waiting on hardware:** Airspy R2 (flip `airspy-r2` true + `rtl-2838`
-  false, re-apply), HF+ and RTL v4 (registry flips). Before any >5 Msps stream
-  into an LXC: raise `net.core.{r,w}mem_max` on **thebeast** (host kernel —
-  read-only inside unprivileged LXCs).
+- **Hardware (2026-06-16):** Airspy R2 **DONE** (scanner cut over) + Airspy HF+
+  **served Pi-side** on an interim whip (`sdr-source@hf-plus` :55002;
+  SoapyAirspyHF now built by the pi provisioner) — but the HF+ is **not yet
+  consumed**: radio-compute AM still reads the dx-R2 long-wire (Antenna C);
+  moving AM → HF+ is a deferred radio-compute follow-up (touches live FM).
+  **Still waiting:** RTL v4 (Meteor/NOAA path is DARK — dipole + Sawbird were
+  pulled to the attic; wxsat-scheduler paused), and the HF+ YouLoop. Before any
+  >5 Msps stream into an LXC: raise `net.core.{r,w}mem_max` on **thebeast** (host
+  kernel — read-only inside unprivileged LXCs).
 - codeserver now has `rsync` — prefer it over tar-over-ssh for thebeast syncs.
 
 ## Hosts & roles
@@ -234,17 +246,21 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   its first enumerable device (the busy RTL on the Pi).
 - **Default gain saturates the dx-R2 ADC** at 8 Msps (`mean|IQ|≈0.98`) — compute
   clients set sane gain at connect (source contract #4).
-- **`sdr-source@{dx-r2,rtl-2838}` are enabled at boot** (post-cutover: the
-  rack compute LXCs are their only clients). The old rule — sources disabled
-  because the Pi radio claimed the dx-R2 — is retired along with
+- **`sdr-source@{dx-r2,airspy-r2,hf-plus}` are enabled at boot** (post-cutover:
+  the rack compute LXCs are their only clients). `sdr-source@rtl-2838` is
+  **disabled+stopped** (Nooelec removed 2026-06-16). The old rule — sources
+  disabled because the Pi radio claimed the dx-R2 — is retired along with
   `sdr-fm@active` (now masked; unmask only for rollback). Devices remain
   single-client: never point a second consumer at a served device.
 - **`remote-exec` inline runs WITHOUT `set -e`** — always chain
   `script && rm -f script` in one line or failures are masked as success.
 - **`grep -q` after a pipe + `pipefail` = SIGPIPE race** (fails on genuine
   matches). Use `grep ... >/dev/null` in provisioning checks.
-- **op25:** R820T gain element is `TUNER` (wrong names silently ignored →
-  deaf dongle); audio to Icecast goes via liquidsoap + audio.py (`mksafe` —
+- **op25:** gain element names are device-specific and wrong names are silently
+  ignored → deaf receiver. The retired RTL2838's R820T was `TUNER`; the **Airspy
+  R2 is `LNA`/`MIX`/`VGA` (0–15 each)** — `run-op25.sh` is keep-if-absent so its
+  `GAINS` is hand-edited on .83 at each device cutover (it does NOT auto-rewrite
+  from the registry). audio to Icecast goes via liquidsoap + audio.py (`mksafe` —
   op25 emits UDP PCM only during calls; bare ffmpeg stalls and drops the
   mount); needs `python3-setuptools` on noble.
 
