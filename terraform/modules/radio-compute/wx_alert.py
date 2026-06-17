@@ -208,6 +208,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(d)))
+        # Public read-only JSON — allow the cross-origin embed
+        # (weather.bobgardner.org) to poll /api/alert. Simple GET, no preflight.
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(d)
 

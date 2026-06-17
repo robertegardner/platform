@@ -1,0 +1,59 @@
+<!--
+  NOAA Weather Radio embed — player + live SAME/EAS alert banner.
+
+  Drop the markup below into any page on weather.bobgardner.org (or anywhere).
+  - Audio: https://icecast.rg2.io/wx.mp3  (media elements load cross-origin
+    without CORS, so the player works from any origin).
+  - Alerts: GET https://wx.rg2.io/api/alert -> {active, recent, decoder, ...}.
+    Cross-origin fetch requires the wx-alert service to send
+    Access-Control-Allow-Origin (added in modules/radio-compute/wx_alert.py);
+    re-provision radio-compute for it to take effect.
+
+  Self-contained: namespaced rg2wx- classes + an IIFE, so it won't collide
+  with the host page's CSS/JS.
+-->
+<div id="rg2wx" class="rg2wx">
+  <div class="rg2wx-banner" id="rg2wx-banner">
+    <div class="rg2wx-ok">No active alerts</div>
+    <div class="rg2wx-meta">monitoring SAME — turns red on a warning</div>
+  </div>
+  <div class="rg2wx-player">
+    <span class="rg2wx-dot" id="rg2wx-dot"></span>
+    <b>NOAA WX 162.550</b>
+    <audio controls preload="none" src="https://icecast.rg2.io/wx.mp3"></audio>
+  </div>
+</div>
+<style>
+.rg2wx{max-width:520px;font:15px/1.5 system-ui,-apple-system,sans-serif;color:#e6edf5}
+.rg2wx .rg2wx-banner{border-radius:12px;padding:.9rem 1.1rem;margin-bottom:.7rem;border:1px solid #243245;background:#141b27}
+.rg2wx .rg2wx-banner.alert{background:linear-gradient(180deg,#3a1416,#241016);border-color:#6e2630}
+.rg2wx .rg2wx-banner.alert.warn{animation:rg2wxPulse 1.4s infinite}
+@keyframes rg2wxPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,90,90,0)}50%{box-shadow:0 0 24px 0 rgba(255,90,90,.35)}}
+.rg2wx .rg2wx-ev{font-size:1.4rem;font-weight:700;color:#ff5a5a}
+.rg2wx .rg2wx-ok{font-size:1.05rem;font-weight:600;color:#5ce08a}
+.rg2wx .rg2wx-meta{color:#b9c6d6;font-size:.85rem;margin-top:.3rem}
+.rg2wx .rg2wx-player{background:#141b27;border:1px solid #243245;border-radius:12px;padding:.8rem 1.1rem;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.rg2wx .rg2wx-player audio{height:36px}
+.rg2wx .rg2wx-dot{width:9px;height:9px;border-radius:50%;background:#445;display:inline-block}
+.rg2wx .rg2wx-dot.on{background:#5ce08a;box-shadow:0 0 8px #5ce08a}
+</style>
+<script>
+(function(){
+  var API="https://wx.rg2.io/api/alert";
+  function $(i){return document.getElementById(i)}
+  function esc(s){return String(s).replace(/[&<>]/g,function(m){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[m]})}
+  function fmtTs(t){return t?new Date(t*1000).toLocaleString():''}
+  function render(d){
+    var dot=$('rg2wx-dot');if(dot)dot.classList.toggle('on',!!d.decoder);
+    var b=$('rg2wx-banner'),a=d.active;if(!b)return;
+    if(a){b.className='rg2wx-banner alert'+(a.priority?' warn':'');
+      b.innerHTML='<div class="rg2wx-ev">'+esc(a.event)+'</div><div class="rg2wx-meta">'+
+        (a.areas&&a.areas.length?'FIPS '+esc(a.areas.join(', '))+' · ':'')+
+        'issued '+fmtTs(a.ts)+(a.station?' · '+esc(a.station):'')+'</div>';
+    }else{b.className='rg2wx-banner';
+      b.innerHTML='<div class="rg2wx-ok">No active alerts</div><div class="rg2wx-meta">monitoring SAME — turns red on a warning</div>';}
+  }
+  function poll(){fetch(API,{cache:'no-store'}).then(function(r){return r.json()}).then(render).catch(function(){})}
+  poll();setInterval(poll,5000);
+})();
+</script>
