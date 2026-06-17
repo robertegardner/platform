@@ -4,7 +4,43 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
-## 2026-06-16 (latest) — Airspy R2 + HF+ attached; scanner cut over to the R2
+## 2026-06-17 (latest) — NOAA Weather Radio + on-demand ATC airband
+
+**State: NOAA WX radio LIVE on /wx.mp3 (HF+); on-demand ATC airband LIVE
+(/scanner-atc.mp3, preempts P25) with a scanner-api endpoint + ems.rg2.io UI
+button. Both built this session on the new hardware.**
+
+- **NOAA Weather Radio — `/wx.mp3` (radio-compute, HF+).** The HF+ Discovery
+  covers VHF 60–260 MHz, so it hears the local NWR transmitter. Scanned the 7 NWR
+  channels on the HF+ whip: **162.550 MHz at ~60 dB SNR** (the local Cape
+  Girardeau transmitter; the whip is plenty). `noaa_stream.py` = numpy NBFM demod
+  (the `wbfm_stream.py` pattern for narrowband — reads the HF+ over SoapyRemote
+  forcing `remote:prot=tcp` as a STREAM arg; rx_fm mangles partial reads) →
+  s16le 16k → ffmpeg → `/wx.mp3` (continuous, no liquidsoap/mksafe).
+  `wx-stream.service` enabled+started at provision (the HF+ is its own device, no
+  FM contention). Verified: clean weather voice (106 dB voice vs 32 dB hiss),
+  ~0% CPU. Independent of the dx-R2/FM and R2/P25 paths.
+- **ATC airband — on-demand, preempts P25 — `/scanner-atc.mp3`.** Per the user's
+  design (sample on demand, can preempt P25). `atc-listen@<freq>.service` stops
+  op25 + the rtl_tcp bridge to free the R2 (discone = best airband antenna),
+  AM-demods one channel (`atc_stream.py`: SoapySDR prot=tcp read, numpy AM
+  envelope + AGC + carrier squelch, 2.5M→12.5k cascade) → `/scanner-atc.mp3`, and
+  **auto-returns to P25 after RuntimeMaxSec=600** or on stop (`ExecStopPost`
+  restarts bridge+op25 on ANY exit). Verified: start @120.55 → P25 preempted, real
+  AWOS voice on the mount; stop → op25 re-locks the CC (tsbks climb).
+- **scanner-api + UI (scanner repo, PR #8).** New `GET /api/atc`,
+  `POST /api/atc/start {freq}` (airband-validated 118–137 MHz, sudo-starts the
+  unit), `POST /api/atc/stop`. The ems.rg2.io UI (`/`) gained an ATC panel: preset
+  buttons (AWOS 120.55 / Tower 119.0 / Approach 133.65 / Ground 121.6), a manual
+  MHz entry, Start/Stop, a status line, and an inline `/scanner-atc.mp3` player.
+- **Hardware notes:** AWOS 120.55 is weakish here (carrier ~0.006–0.009, ~15 dB
+  voice/hiss on the discone) — it's a low-power airport tx; real tower/approach
+  traffic when present is stronger. Gain/squelch are env-tunable
+  (`/etc/scanner-compute/atc.env`, `ATC_GAINS`/`ATC_SQUELCH`).
+- **Mounts:** `/wx.mp3` added (radio); `/scanner-atc.mp3` is on-demand (not
+  continuous). FM/EMS untouched. Both provisioner-integrated (re-provision safe).
+
+## 2026-06-16 — Airspy R2 + HF+ attached; scanner cut over to the R2
 
 **State: SCANNER LIVE on the Airspy R2 (discone) via a new rtl_tcp bridge — op25
 decodes MOSWIN, follows voice calls (TG 57/6708/6711 confirmed), tsbks climbing,

@@ -77,11 +77,12 @@ whole thing up.
   icecast.xml). NPM repoint to .82 is LAST — it retires the relays and the
   Pi's icecast2. (An early NPM repoint before the fm cutover 404'd the public
   radio — don't repoint until every mount is rack-sourced.)
-- **Hardware (2026-06-16):** Airspy R2 **DONE** (scanner cut over) + Airspy HF+
-  **served Pi-side** on an interim whip (`sdr-source@hf-plus` :55002;
-  SoapyAirspyHF now built by the pi provisioner) — but the HF+ is **not yet
-  consumed**: radio-compute AM still reads the dx-R2 long-wire (Antenna C);
-  moving AM → HF+ is a deferred radio-compute follow-up (touches live FM).
+- **Hardware (2026-06-16/17):** Airspy R2 **DONE** (scanner cut over) + Airspy HF+
+  **serving NOAA Weather Radio** — `wx-stream.service` on radio-compute NBFM-demods
+  the local NWR tx (**162.550**, ~60 dB on the HF+ whip) → continuous `/wx.mp3`
+  (`sdr-source@hf-plus` :55002; SoapyAirspyHF built by the pi provisioner). The
+  HF+'s eventual AM-broadcast role (dx-R2 long-wire today) is deferred. **ATC
+  airband** is on-demand on the R2 (preempts P25; see the ems.rg2.io NPM entry).
   **Still waiting:** RTL v4 (Meteor/NOAA path is DARK — dipole + Sawbird were
   pulled to the attic; wxsat-scheduler paused), and the HF+ YouLoop. Before any
   >5 Msps stream into an LXC: raise `net.core.{r,w}mem_max` on **thebeast** (host
@@ -296,7 +297,10 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   app's scanner backend; deployed from the scanner repo). Also serves a human
   **EMS captions UI at `/`** (live caption + transcript log from
   scanner-transcribe, via `/api/transcribe` + `/api/transcript`); JSON service
-  descriptor moved to `/api`. NEVER point it at the Pi's old scheduler — its
+  descriptor moved to `/api`. The UI also has an **ATC airband control** (preset
+  freqs + manual MHz + start/stop) driving `/api/atc/*` → `atc-listen@<freq>`
+  (on-demand AM on the R2, **preempts P25**, auto-returns after 10 min →
+  `/scanner-atc.mp3`). NEVER point it at the Pi's old scheduler — its
   MOSWIN job USB-resets the dongle out from under sdr-source@rtl-2838.
 - `p25.rg2.io` → radio.srvr:8081 (the V1 scanner UI in READ-ONLY mode:
   /listen plays the live op25 feed with captions + the V1 archive pages.
