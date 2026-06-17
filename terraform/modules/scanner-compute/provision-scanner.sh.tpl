@@ -201,29 +201,56 @@ if [ -f /opt/scanner-compute/run-op25.sh ]; then
 else
   cat > /opt/scanner-compute/run-op25.sh <<'EOF'
 #!/usr/bin/env bash
-# op25 trunk receiver — Cape County MOSWIN (P25 Phase II), remote source via
-# SoapyRemote. Hand-tunable (gain, fine-tune, flags) — provisioning writes this
-# only if absent. Audio goes out as PCM over UDP to ems-stream.service.
+# op25 trunk receiver — Cape County MOSWIN (P25 Phase II). Reads IQ from the
+# LOCAL rtl_tcp bridge (rtltcp-bridge.service) on 127.0.0.1:1234, NOT directly
+# from SoapyRemote. Why: op25's gr-osmosdr soapy-remote source cannot sustain a
+# high-rate remote stream — the Airspy R2 at 2.5 Msps CS16 (~80 Mbps) stalls it
+# after ~one buffer (it won't forward remote:prot=tcp to the stream, so the
+# transport stays lossy UDP), and op25 won't trunk from a file source. The bridge
+# tight-loops the R2 over SoapyRemote (forcing prot=tcp) and re-serves it as
+# rtl_tcp CU8 (~40 Mbps, the profile op25 was happy with on the retired RTL);
+# op25's SET_FREQ retunes propagate through it so trunk-following works.
+# Gain is set SERVER-SIDE in the bridge (IQ_GAINS, /etc/scanner-compute/rtltcp-bridge.env).
+# Hand-tunable; write-if-absent.
 set -euo pipefail
 . /etc/scanner-compute/scanner.env
 . "/etc/scanner-compute/source-$ACTIVE_SOURCE.env"
-
-# Source contract #4: the client sets sane gain at connect (server-side default
-# saturates). The R820T exposes a single "TUNER" gain element (0-49.6 dB) —
-# wrong element names are silently ignored and leave the dongle deaf
-# (proven on air 2026-06-10). Tune via the op25 http terminal on :8080.
-GAINS="TUNER:38"
 
 cd /opt/op25/op25/gr-op25_repeater/apps
 # -V -w (vocoder + UDP PCM out to 127.0.0.1:23456), NOT -U: -U additionally
 # spawns op25's own UDP player, which BINDS the port that ems-stream's
 # audio.py needs — a restart-order lottery (bit us 2026-06-10).
-exec ./rx.py --nocrypt --args "$OSMOSDR_ARGS" --gains "$GAINS" \
+exec ./rx.py --nocrypt --args "rtl_tcp=127.0.0.1:1234" \
   -S "$SAMPLE_RATE" -q 0 -T /opt/scanner-compute/moswin-trunk.tsv \
   -2 -V -w -v 1 -l 'http:0.0.0.0:8080' \
   2>>/var/lib/scanner-compute/op25-stderr.log
 EOF
   chmod +x /opt/scanner-compute/run-op25.sh
+fi
+
+echo "==> rtl_tcp bridge (remote Airspy R2 -> op25; write-if-absent script + env)"
+# The bridge that makes op25 work with the high-rate Airspy R2 (see run-op25.sh).
+# Script is write-if-absent so hand edits survive; runtime knobs live in the env.
+if [ -f /opt/scanner-compute/rtltcp_bridge.py ]; then
+  echo "    rtltcp_bridge.py exists - keeping it"
+else
+  cat > /opt/scanner-compute/rtltcp_bridge.py <<'PYEOF'
+${rtltcp_bridge_py}
+PYEOF
+  chmod +x /opt/scanner-compute/rtltcp_bridge.py
+fi
+if [ -f /etc/scanner-compute/rtltcp-bridge.env ]; then
+  echo "    rtltcp-bridge.env exists - keeping it"
+else
+  cat > /etc/scanner-compute/rtltcp-bridge.env <<'EOF'
+# rtl_tcp bridge runtime knobs (hand-tunable; SOAPY_ARGS comes from the active
+# source env via the unit's other EnvironmentFile). Airspy R2 gain elements are
+# LNA/MIX/VGA (0-15). CU8_SHIFT scales CS16->CU8 (x>>shift +128); 8 = no clip.
+IQ_GAINS=LNA:15,MIX:15,VGA:15
+CU8_SHIFT=8
+RTLTCP_PORT=1234
+IQ_FREQ=769168750
+EOF
 fi
 
 # Liquidsoap, NOT bare ffmpeg: op25 emits UDP PCM only DURING calls, so a
@@ -353,6 +380,40 @@ RestartSec=10s
 WantedBy=multi-user.target
 EOF
 
+# rtl_tcp bridge: tight-loop SoapySDR reader (remote Airspy R2, prot=tcp) re-served
+# to op25 as rtl_tcp CU8 (see run-op25.sh for why op25's own soapy-remote source
+# can't read the R2). SOAPY_ARGS comes from the active source env; gain/port/shift
+# from rtltcp-bridge.env. Runs as scanner (same as op25-ems).
+cat > /etc/systemd/system/rtltcp-bridge.service <<'EOF'
+[Unit]
+Description=rtl_tcp bridge: remote Airspy R2 -> op25 (tight-loop SoapySDR reader, prot=tcp)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=scanner
+Group=scanner
+Environment=LD_LIBRARY_PATH=/usr/local/lib
+EnvironmentFile=/etc/scanner-compute/source-${active_source}.env
+EnvironmentFile=/etc/scanner-compute/rtltcp-bridge.env
+ExecStart=/usr/bin/python3 /opt/scanner-compute/rtltcp_bridge.py
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# op25 requires the bridge up first. A drop-in (not an edit) so it survives the
+# op25-ems.service rewrite above on every re-apply.
+mkdir -p /etc/systemd/system/op25-ems.service.d
+cat > /etc/systemd/system/op25-ems.service.d/10-rtltcp.conf <<'EOF'
+[Unit]
+After=rtltcp-bridge.service
+Requires=rtltcp-bridge.service
+EOF
+
 cat > /etc/systemd/system/ems-stream.service <<'EOF'
 [Unit]
 Description=EMS audio publish: op25 UDP PCM -> rack Icecast /ems.mp3
@@ -422,6 +483,11 @@ EOF
 systemctl daemon-reload
 systemctl enable op25-watch.timer >/dev/null 2>&1 || true
 systemctl start op25-watch.timer || true
+# The bridge is enabled at boot (op25-ems Requires it). Harmless when up alone —
+# it only opens the remote R2 once op25 connects. op25-ems itself stays
+# laid-down-not-started (cutover enables it by hand), same as before.
+systemctl enable rtltcp-bridge.service >/dev/null 2>&1 || true
+systemctl restart rtltcp-bridge.service || true
 
 echo "==> provisioning complete (units laid down, not started — cutover enables them)"
 %{ for id, dev in devices ~}

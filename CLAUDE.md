@@ -50,16 +50,17 @@ whole thing up.
   path (R): .84 disable the FM units; Pi unmask+start `sdr-fm@active`, disable
   `sdr-source@dx-r2`, re-enable `pi-fm-watch.timer`+`sdr-captions`; NPM
   radio.rg2.io → radio.srvr:8080.
-- **P25 on scanner-compute** (LXC **901**, .83): op25 targets the **Airspy R2**
-  (`airspy-r2` :55003, CS16 @ 2.5 Msps ~80 Mbps, enabled at boot) → rack
-  `/ems.mp3`. **Cut over from the interim `rtl-2838` 2026-06-16** when the user
-  moved the discone to the R2 and pulled the Nooelec. op25 gain is
-  **`LNA/MIX/VGA`** (Airspy elements — `TUNER:38` was R820T-only). **⚠ DECODE
-  BLOCKED 2026-06-16 (scanner DOWN, no rollback — RTL gone):** op25/gr-osmosdr
-  can't sustain the R2's 80 Mbps SoapyRemote stream (stalls ~128K samples; RF is
-  excellent, ~38 dB CC SNR via rx_sdr). Fix = a tight-loop IQ bridge → FIFO →
-  op25 `file=` source (à la `wbfm_stream.py`). See session_notes 2026-06-16.
-  Interim-dark:
+- **P25 on scanner-compute** (LXC **901**, .83): op25 decodes the **Airspy R2**
+  (discone) → rack `/ems.mp3`, LIVE. **Cut over from the interim `rtl-2838`
+  2026-06-16** when the user moved the discone to the R2 and pulled the Nooelec.
+  op25 does NOT read the R2 directly: gr-osmosdr can't sustain its 80 Mbps
+  SoapyRemote stream (stalls; won't force prot=tcp; won't trunk from a file). So
+  **`rtltcp-bridge.service`** (NEW, on .83) tight-loops the R2 over SoapyRemote
+  (prot=tcp, `wbfm_stream.py` pattern) and re-serves it to op25 as **rtl_tcp CU8**
+  (~40 Mbps); op25 runs `--args rtl_tcp=127.0.0.1:1234` (a tunable source, so
+  trunk-following works). Gain is server-side in the bridge
+  (`IQ_GAINS=LNA:15,MIX:15,VGA:15`, `/etc/scanner-compute/rtltcp-bridge.env`).
+  op25-ems `Requires=rtltcp-bridge` (drop-in). Interim-dark:
   `/ems-{fire,police,interop}`, `/monitor.mp3`, EMS transcripts. Scanner
   rollback path (if ever needed): SCHEDULER_EMS_DEFAULT=true + disable
   sdr-source@rtl-2838 + stop op25-ems/ems-stream.

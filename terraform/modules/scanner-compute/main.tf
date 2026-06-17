@@ -135,6 +135,7 @@ locals {
     icecast_port            = var.icecast_port
     icecast_source_password = var.icecast_source_password
     whisper_token           = var.whisper_token
+    rtltcp_bridge_py        = file("${path.module}/rtltcp_bridge.py")
   })
 }
 

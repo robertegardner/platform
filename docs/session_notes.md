@@ -6,12 +6,10 @@ Working notes per session, newest first. Full detail lives in
 
 ## 2026-06-16 (latest) — Airspy R2 + HF+ attached; scanner cut over to the R2
 
-**State: SCANNER CUTOVER MECHANICALLY DONE but DECODE BLOCKED. The Airspy R2
-(discone) signal is excellent (CC SNR ~38 dB, proven by rx_sdr), but op25 decodes
-0 TSBKs: gr-osmosdr can't sustain the R2's 80 Mbps SoapyRemote stream (2.5 Msps
-CS16 — 2x the retired RTL's 38 Mbps CU8) and stalls after ~128K samples. Scanner
-is DOWN with NO rollback (RTL physically removed). HF+ brought up Pi-side on an
-interim whip. wxsat paused (Meteor antenna gone). FM untouched/live.**
+**State: SCANNER LIVE on the Airspy R2 (discone) via a new rtl_tcp bridge — op25
+decodes MOSWIN, follows voice calls (TG 57/6708/6711 confirmed), tsbks climbing,
+all enabled-at-boot. HF+ brought up Pi-side on an interim whip. wxsat paused
+(Meteor antenna gone). FM untouched/live.**
 
 - **Physical changes (user):** Airspy R2 + Airspy HF+ plugged into the Pi.
   Antennas moved — **discone → Airspy R2** (was on the Nooelec); Shakespeare 5120
@@ -37,33 +35,37 @@ interim whip. wxsat paused (Meteor antenna gone). FM untouched/live.**
   2.5 Msps. **op25 gain fix (manual, .83):** `run-op25.sh` GAINS was the R820T
   `TUNER:38` element — the Airspy has **LNA/MIX/VGA (0–15 each)**, so set
   `GAINS="LNA:14,MIX:12,VGA:11"` (backup `run-op25.sh.rtl-bak`).
-- **BLOCKER — op25 decodes 0 TSBKs (scanner DOWN).** The op25 terminal shows
-  `tsbks: 0, frequencies: {}` — the "monitoring control channel" from
-  scanner-api/`/api/status` is MISLEADING (it goes fresh on any periodic
-  trunk_update state report, NOT on actual TSBK decode). Full diagnosis chain:
-  1. **RF/signal is excellent.** Local `rx_sdr` on the Pi at the CC shows the
-     C4FM carrier at **~34–39 dB SNR** (no clip) once gain is up; the DC spike is
-     32 dB *below* the CC, so DC is NOT the problem. Gain (LNA/MIX/VGA up to max),
-     a TSV center-frequency offset (CC off-DC), and the gain-element fix were all
-     tried — none made op25 decode.
-  2. **`rx_sdr` (tight read loop) streams the R2 fine over SoapyRemote** to .84
-     and the Pi loopback (full 2.5 Msps, 40 MB/5 s). So device + transport are OK.
-  3. **`gr-osmosdr` (op25's reader) CANNOT sustain it** — an isolated osmosdr
-     flowgraph on .83 gets only ~128K samples (sometimes 0) then **stalls**. The
-     R2 at 2.5 Msps CS16 = **80 Mbps**, double the retired RTL's 38 Mbps CU8 that
-     worked. `remote:format=CS8` (halve BW) and `remote:prot=tcp` as device args
-     both gave 0 through gr-osmosdr (it doesn't forward stream args — same
-     limitation the radio side hit with rx_fm). This is the **scanner analog of
-     the rx_fm/SoapyRemote wall** that forced `wbfm_stream.py` for FM.
-  - **Likely fix (next session, deliberate — scanner repo):** a tight-loop
-     SoapySDR IQ bridge (à la `wbfm_stream.py`/`am_stream.py`) on .83 reading the
-     R2 (prot=tcp, tight loop) → FIFO → op25 via a gr-osmosdr **`file=` source**
-     (raw fc32), letting FIFO backpressure pace it. Other options: lower the wire
-     rate some other way, or run op25 on the Pi against the local airspy (reverses
-     the rack-compute architecture). NO quick config fix found.
-  - **Left clean:** source restarted fresh, op25-ems running (deaf), op25-watch
-     re-enabled (it reads `current!=None` = the periodic state report, so it does
-     NOT restart-loop), gain at a sane LNA:14/MIX:12/VGA:11, TSV reverted.
+- **THE WALL + THE FIX — `rtltcp-bridge.service` (NEW).** op25 first decoded **0
+  TSBKs** (`tsbks: 0` in the op25 terminal; scanner-api's "monitoring control
+  channel" is MISLEADING — it goes fresh on any periodic trunk_update, NOT on real
+  TSBK decode, so use `tsbks` from the terminal as the truth signal). Diagnosis:
+  1. **RF is excellent** — local `rx_sdr` shows the CC C4FM at **~34–39 dB SNR**;
+     the DC spike is 32 dB *below* the CC at adequate gain. Gain, a TSV
+     center-offset, and the gain-element fix were all red herrings.
+  2. **`rx_sdr` (tight read loop) streams the R2 fine** (full 2.5 Msps to .84 +
+     Pi loopback). Device + transport are OK. (NB my early python `readStream`
+     probe returned 0 even on .84 where rx_sdr works — the probe was buggy, a
+     red herring; don't trust it.)
+  3. **`gr-osmosdr` (op25's reader) CANNOT sustain the R2's 80 Mbps stream** — an
+     isolated osmosdr flowgraph stalls after ~128K samples. It won't forward
+     `remote:prot=tcp` to the stream (stays lossy UDP) and won't trunk from a
+     `file=` source (op25 exits/idles). The scanner analog of the rx_fm wall.
+  - **FIX = `rtltcp_bridge.py` + `rtltcp-bridge.service` on .83.** A tight-loop
+     SoapySDR reader (the `wbfm_stream.py` pattern: CS16, **prot=tcp as a STREAM
+     arg** — the thing gr-osmosdr can't do) that re-serves the R2 to op25 over the
+     **rtl_tcp protocol** as CU8 (~40 Mbps, the RTL profile op25 was happy with).
+     op25's `--args rtl_tcp=127.0.0.1:1234` is a robust *tunable* source, so
+     SET_FREQ retunes propagate → **full trunk-following works**. Verified live:
+     tsbks 600→960+, system fully decoded (NAC 0x1CC, WACN 0xBEE00, SYSID 0x1CE,
+     769.16875/799.16875), fresh calls followed (TG 57/6708/6711). Gain is
+     server-side in the bridge (`IQ_GAINS=LNA:15,MIX:15,VGA:15`, CU8_SHIFT=8 = no
+     clip). All services active+enabled: `rtltcp-bridge`, `op25-ems` (drop-in
+     `Requires=rtltcp-bridge`), `op25-watch.timer`, `ems-stream`.
+  - **Provisioner integrated (re-provision safe):** scanner-compute now lays down
+     `rtltcp_bridge.py` (module file, embedded via `file()`), the bridge unit
+     (EnvironmentFile = active source env + `rtltcp-bridge.env`), the op25-ems
+     drop-in, and `run-op25.sh` → rtl_tcp. Validated + plan-rendered; NOT applied
+     (live already matches; apply would needlessly blip the scanner).
 - **HF+ is served but NOT yet consumed.** radio-compute's AM branch
   (`am_stream.py`) still hardcodes `source-dx-r2.env` (Antenna C long-wire).
   Moving AM onto the HF+ is a **deliberate radio-compute follow-up** (it touches
