@@ -306,8 +306,10 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   NOAA Weather Radio page: `/wx.mp3` player + a live **SAME/EAS alert banner**.
   Decodes alerts off `/wx.mp3` (`ffmpeg | multimon-ng -a EAS`); on an alert fires
   a webhook (`HA_WEBHOOK_URL` in `wx-alert.env` → Home Assistant, for house
-  speakers/push) + logs. NPM host created (clone of radio.rg2.io); **needs a DNS
-  record for wx.rg2.io.** `POST /api/test` injects a test alert.)
+  speakers/push) + logs. NPM host created (clone of radio.rg2.io). DNS resolves
+  via the `*.rg2.io` wildcard, but **needs a per-domain TLS cert** (cloned host
+  serves radio.rg2.io's cert). `POST /api/test` injects a test alert. The HA
+  webhook needs a non-default `User-Agent` — Cloudflare 403s `Python-urllib`.)
 - `ems.rg2.io` now serves the **V1-style amber-LCD tuner** at `/` (NFM/AM presets
   NOAA WX/Marine/EMS/KCGI-Tower-125.525/Memphis-Center, squelch, direct tune) →
   `/api/monitor/{tune,stop}` → `monitor.service` (NFM/AM on the R2, **preempts
