@@ -83,7 +83,8 @@ def fire_webhook(alert):
     try:
         data = json.dumps(alert).encode()
         req = urllib.request.Request(HA_WEBHOOK_URL, data=data,
-                                     headers={"Content-Type": "application/json"})
+                                     headers={"Content-Type": "application/json",
+                                              "User-Agent": "wx-alert/1.0"})
         urllib.request.urlopen(req, timeout=8)
         log(f"webhook fired: {alert['event']}")
     except Exception as e:  # noqa: BLE001
