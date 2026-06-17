@@ -21,13 +21,17 @@
       "source": "AM broadcast, e.g. /am-1120.mp3 KMOX",
       "pattern": true
     },
+    "/wx.mp3": {
+      "domain": "radio",
+      "source": "NOAA Weather Radio (NBFM 162.550, local NWR) on the Airspy HF+ — continuous (wx-stream.service on radio-compute)"
+    },
     "/scanner-p25.mp3": {
       "domain": "scanner",
       "source": "active P25 talkgroup audio"
     },
     "/scanner-atc.mp3": {
       "domain": "scanner",
-      "source": "ATC audio (when the R2 is on ATC)"
+      "source": "ATC audio, on-demand only — preempts P25 on the R2 (discone) when requested; not a continuous mount"
     },
     "/fm-duck.mp3": {
       "domain": "radio",
