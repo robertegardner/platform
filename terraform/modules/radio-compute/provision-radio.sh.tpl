@@ -450,6 +450,78 @@ ExecStopPost=+/usr/bin/systemctl start fm-watch.timer
 EOF
 systemctl daemon-reload
 
+echo "==> NOAA Weather Radio (HF+ NBFM -> rack Icecast /wx.mp3)"
+# Continuous NBFM demod of the local NWR transmitter (162.550 MHz, validated
+# ~60 dB SNR on the HF+ whip 2026-06-17). noaa_stream.py is the wbfm_stream.py
+# pattern for narrowband (reads the HF+ over SoapyRemote, prot=tcp stream arg —
+# rx_fm mangles SoapyRemote partial reads). Continuous source, so plain ffmpeg
+# (no liquidsoap/mksafe). Independent of the dx-R2/FM path — the HF+ is its own
+# device. Scripts write-if-absent (hand-tunable); env carries the secret.
+if [ -f /opt/sdr-tuner/noaa_stream.py ]; then
+  echo "    noaa_stream.py exists - keeping it"
+else
+  cat > /opt/sdr-tuner/noaa_stream.py <<'PYEOF'
+${noaa_stream_py}
+PYEOF
+  chmod +x /opt/sdr-tuner/noaa_stream.py
+fi
+if [ -f /etc/radio-compute/wx.env ]; then
+  echo "    wx.env exists - keeping it"
+else
+  cat > /etc/radio-compute/wx.env <<'EOF'
+# NOAA Weather Radio (NBFM) on the Airspy HF+ -> rack Icecast /wx.mp3.
+# 162.550 MHz = the local Cape Girardeau NWR transmitter. Continuous.
+WX_FREQ=162550000
+WX_GAIN=32
+MOUNT=wx.mp3
+ICECAST_HOST=${icecast_host}
+ICECAST_PORT=${icecast_port}
+ICECAST_PASS=${icecast_source_password}
+SOAPY_ARGS=driver=remote,remote=tcp://${pi_host}:55002,remote:driver=airspyhf
+EOF
+  chmod 0640 /etc/radio-compute/wx.env
+  chown root:radio /etc/radio-compute/wx.env 2>/dev/null || true
+fi
+if [ -f /opt/sdr-tuner/wx-stream.sh ]; then
+  echo "    wx-stream.sh exists - keeping it"
+else
+  cat > /opt/sdr-tuner/wx-stream.sh <<'EOF'
+#!/usr/bin/env bash
+# NOAA Weather Radio: HF+ NBFM (noaa_stream.py) -> mp3 -> rack Icecast /wx.mp3.
+set -euo pipefail
+. /etc/radio-compute/wx.env
+export SOAPY_ARGS WX_FREQ WX_GAIN
+exec bash -c "LD_LIBRARY_PATH=/usr/local/lib python3 /opt/sdr-tuner/noaa_stream.py | \
+  ffmpeg -hide_banner -loglevel error -f s16le -ar 16000 -ac 1 -i - \
+    -codec:a libmp3lame -b:a 32k -content_type audio/mpeg \
+    -ice_name 'NOAA Weather Radio' -f mp3 \
+    icecast://source:$ICECAST_PASS@$ICECAST_HOST:$ICECAST_PORT/$MOUNT"
+EOF
+  chmod +x /opt/sdr-tuner/wx-stream.sh
+fi
+cat > /etc/systemd/system/wx-stream.service <<'EOF'
+[Unit]
+Description=NOAA Weather Radio (HF+ NBFM 162.550 -> rack Icecast /wx.mp3)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=radio
+Group=radio
+ExecStart=/opt/sdr-tuner/wx-stream.sh
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+# The HF+ is its own device (no FM contention), so this one DOES start at
+# provision — unlike the dx-R2/FM units.
+systemctl enable wx-stream.service >/dev/null 2>&1 || true
+systemctl restart wx-stream.service || true
+
 echo "==> provisioning complete (toolchain staged; no units, nothing started)"
 echo "    csdr=$(command -v csdr || echo missing) nrsc5=$(command -v nrsc5 || echo missing) satdump=$(command -v satdump || echo missing)"
 %{ for id, dev in devices ~}

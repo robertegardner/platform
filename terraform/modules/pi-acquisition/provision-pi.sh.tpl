@@ -79,6 +79,28 @@ else
     || { echo "FATAL: rtlsdr factory still not visible after build"; exit 1; }
 fi
 
+echo "==> SoapyAirspyHF module (build-if-absent)"
+# Needed to serve the Airspy HF+ (am-broadcast) over SoapyRemote. Debian ships no
+# soapysdr-module-airspyhf, so build it from source against libairspyhf-dev (which
+# IS in apt; the runtime libairspyhf.so is already present via SatDump). The
+# Airspy R2 (driver=airspy) is already served by the apt libairspySupport module —
+# only the HF+ driver is missing. grep without -q (pipefail SIGPIPE on match).
+if LD_LIBRARY_PATH=/usr/local/lib SoapySDRUtil --info 2>/dev/null | grep -i airspyhf >/dev/null; then
+  echo "    airspyhf factory already visible - keeping it"
+else
+  apt-get update -qq || true
+  apt-get install -y -qq libairspyhf-dev git cmake g++ make pkg-config
+  tmp="$(mktemp -d)"
+  git clone --depth 1 https://github.com/pothosware/SoapyAirspyHF.git "$tmp/SoapyAirspyHF"
+  cmake -S "$tmp/SoapyAirspyHF" -B "$tmp/SoapyAirspyHF/build" -DCMAKE_BUILD_TYPE=Release
+  cmake --build "$tmp/SoapyAirspyHF/build" -j"$(nproc)"
+  cmake --install "$tmp/SoapyAirspyHF/build"
+  rm -rf "$tmp"
+  ldconfig
+  LD_LIBRARY_PATH=/usr/local/lib SoapySDRUtil --info 2>/dev/null | grep -i airspyhf >/dev/null \
+    || { echo "FATAL: airspyhf factory still not visible after build"; exit 1; }
+fi
+
 echo "==> Per-device source environment files"
 mkdir -p /etc/sdr-source
 %{ for id, dev in devices ~}

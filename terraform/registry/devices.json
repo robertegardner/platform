@@ -8,10 +8,10 @@
       "feed": "Shakespeare 5120",
       "filter": "FM bandpass",
       "_antenna_ports": {
-        "_comment": "RSPdx-R2 is a single tuner with 3 software-selectable antenna inputs (one band at a time). 'antenna'/'feed'/'filter' above describe the ACTIVE port (A, the FM job). Ports B and C are an interim antenna farm covering roles slated for dedicated hardware: B -> NOAA/Meteor (rtl-v4), C -> AM broadcast (hf-plus). Until the V1-hybrid FM job stops owning this device, B/C are physical-readiness only.",
+        "_comment": "RSPdx-R2 is a single tuner with 3 software-selectable antenna inputs (one band at a time). 'antenna'/'feed'/'filter' above describe the ACTIVE port (A, the FM job). Port B is now EMPTY (the dipole + Sawbird+ NOAA LNA were removed 2026-06-16 for troubleshooting on a separate Pi, taking the interim Meteor/NOAA path with them — no replacement until an RTL v4 is acquired). Port C carries the AM long-wire, consumed by radio-compute's am_stream.py over the remote dx-R2 (the eventual AM home is the HF+, deferred until its YouLoop + the radio-compute AM rewire).",
         "Antenna A": "Shakespeare 5120 + FM bandpass (active, fm-multistation)",
-        "Antenna B": "dipole + Sawbird+ NOAA (LNA) — interim NOAA/Meteor",
-        "Antenna C": "AM loop + inline choke — interim AM broadcast"
+        "Antenna B": "(empty — dipole + Sawbird+ NOAA LNA removed to the attic 2026-06-16)",
+        "Antenna C": "long-wire — interim AM broadcast"
       },
       "role": "fm-multistation",
       "domain": "radio",
@@ -24,11 +24,12 @@
       "usb_controller": "A"
     },
     "hf-plus": {
-      "present": false,
+      "_comment": "Airspy HF+ — attached 2026-06-16, served on the Pi (sdr-source@hf-plus :55002, SoapyAirspyHF built by the pi provisioner). Interim antenna is a WHIP until the YouLoop arrives. NOTE: present:true makes the pi-acquisition provisioner lay down its source server, but the radio-compute AM consumer still reads the dx-R2 long-wire (Antenna C) — moving AM onto the HF+ is a deliberate radio-compute follow-up (touches the live FM stream), not yet done.",
+      "present": true,
       "soapy_args": "driver=airspyhf",
       "antenna": "single",
-      "feed": "YouLoop (primary) / long-wire (alt)",
-      "filter": "HF choke on long-wire",
+      "feed": "whip (interim) / YouLoop (pending)",
+      "filter": "none (whip)",
       "role": "am-broadcast",
       "domain": "radio",
       "transport": "soapy-remote",
@@ -39,8 +40,8 @@
       "usb_controller": "A"
     },
     "rtl-2838": {
-      "_comment": "INTERIM scanner source — the existing Nooelec RTL2838 that ran SDRTrunk on the Pi until the 2026-06 P25 offload. Serves the scanner domain over SoapyRemote (same transport the R2 will use) until the Airspy R2 arrives; then flip this to present:false and airspy-r2 to true in the same change. Single client = rack op25; the Pi-side monitor/manual-tune rtl_fm jobs lose the dongle while this is present.",
-      "present": true,
+      "_comment": "RETIRED 2026-06-16 — the Nooelec RTL2838 was physically removed (taken to the attic for troubleshooting on a separate Pi). Its discone moved to the Airspy R2. Scanner P25 cut over to airspy-r2 in the same change (present:false here, airspy-r2 present:true). Kept in the registry for history/rollback; the device is not plugged in.",
+      "present": false,
       "soapy_args": "driver=rtlsdr",
       "antenna": "single",
       "feed": "discone",
@@ -56,7 +57,8 @@
       "usb_controller": "A"
     },
     "airspy-r2": {
-      "present": false,
+      "_comment": "LIVE scanner source as of 2026-06-16 — carries the discone (moved off the retired rtl-2838). Gain elements are LNA/MIX/VGA (0-15 each), NOT the R820T 'TUNER' element — op25 run-op25.sh GAINS is hand-set on .83 accordingly. Native CS16, rates 2.5/10 MSps (held at 2.5).",
+      "present": true,
       "soapy_args": "driver=airspy",
       "antenna": "single",
       "feed": "discone",
@@ -72,6 +74,7 @@
       "usb_controller": "B"
     },
     "rtl-v4": {
+      "_comment": "NOT acquired yet (2026-06-16). The Meteor/NOAA path it would own is currently DARK — the V-dipole + Sawbird+ NOAA LNA were removed to the attic on 2026-06-16, and the Pi wxsat-scheduler is paused until an RTL v4 + antenna return. Feed/filter below describe the intended setup, not what is plugged in.",
       "present": false,
       "soapy_args": "driver=rtlsdr",
       "antenna": "single",

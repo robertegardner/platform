@@ -4,7 +4,121 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
-## 2026-06-14 (latest) — wxsat UI fix (proxy + delete), V2 cleanup pass
+## 2026-06-17 (latest) — NOAA Weather Radio + on-demand ATC airband
+
+**State: NOAA WX radio LIVE on /wx.mp3 (HF+); on-demand ATC airband LIVE
+(/scanner-atc.mp3, preempts P25) with a scanner-api endpoint + ems.rg2.io UI
+button. Both built this session on the new hardware.**
+
+- **NOAA Weather Radio — `/wx.mp3` (radio-compute, HF+).** The HF+ Discovery
+  covers VHF 60–260 MHz, so it hears the local NWR transmitter. Scanned the 7 NWR
+  channels on the HF+ whip: **162.550 MHz at ~60 dB SNR** (the local Cape
+  Girardeau transmitter; the whip is plenty). `noaa_stream.py` = numpy NBFM demod
+  (the `wbfm_stream.py` pattern for narrowband — reads the HF+ over SoapyRemote
+  forcing `remote:prot=tcp` as a STREAM arg; rx_fm mangles partial reads) →
+  s16le 16k → ffmpeg → `/wx.mp3` (continuous, no liquidsoap/mksafe).
+  `wx-stream.service` enabled+started at provision (the HF+ is its own device, no
+  FM contention). Verified: clean weather voice (106 dB voice vs 32 dB hiss),
+  ~0% CPU. Independent of the dx-R2/FM and R2/P25 paths.
+- **ATC airband — on-demand, preempts P25 — `/scanner-atc.mp3`.** Per the user's
+  design (sample on demand, can preempt P25). `atc-listen@<freq>.service` stops
+  op25 + the rtl_tcp bridge to free the R2 (discone = best airband antenna),
+  AM-demods one channel (`atc_stream.py`: SoapySDR prot=tcp read, numpy AM
+  envelope + AGC + carrier squelch, 2.5M→12.5k cascade) → `/scanner-atc.mp3`, and
+  **auto-returns to P25 after RuntimeMaxSec=600** or on stop (`ExecStopPost`
+  restarts bridge+op25 on ANY exit). Verified: start @120.55 → P25 preempted, real
+  AWOS voice on the mount; stop → op25 re-locks the CC (tsbks climb).
+- **scanner-api + UI (scanner repo, PR #8).** New `GET /api/atc`,
+  `POST /api/atc/start {freq}` (airband-validated 118–137 MHz, sudo-starts the
+  unit), `POST /api/atc/stop`. The ems.rg2.io UI (`/`) gained an ATC panel: preset
+  buttons (AWOS 120.55 / Tower 119.0 / Approach 133.65 / Ground 121.6), a manual
+  MHz entry, Start/Stop, a status line, and an inline `/scanner-atc.mp3` player.
+- **Hardware notes:** AWOS 120.55 is weakish here (carrier ~0.006–0.009, ~15 dB
+  voice/hiss on the discone) — it's a low-power airport tx; real tower/approach
+  traffic when present is stronger. Gain/squelch are env-tunable
+  (`/etc/scanner-compute/atc.env`, `ATC_GAINS`/`ATC_SQUELCH`).
+- **Mounts:** `/wx.mp3` added (radio); `/scanner-atc.mp3` is on-demand (not
+  continuous). FM/EMS untouched. Both provisioner-integrated (re-provision safe).
+
+## 2026-06-16 — Airspy R2 + HF+ attached; scanner cut over to the R2
+
+**State: SCANNER LIVE on the Airspy R2 (discone) via a new rtl_tcp bridge — op25
+decodes MOSWIN, follows voice calls (TG 57/6708/6711 confirmed), tsbks climbing,
+all enabled-at-boot. HF+ brought up Pi-side on an interim whip. wxsat paused
+(Meteor antenna gone). FM untouched/live.**
+
+- **Physical changes (user):** Airspy R2 + Airspy HF+ plugged into the Pi.
+  Antennas moved — **discone → Airspy R2** (was on the Nooelec); Shakespeare 5120
+  still on dx-R2 Antenna A (FM); long-wire still on dx-R2 Antenna C (AM). The
+  **Nooelec RTL2838, Sawbird+ NOAA LNA, and the Meteor dipole were removed to the
+  attic** for troubleshooting on a separate Pi. **No RTL v4 yet.** A **whip** is
+  on the HF+ for now (YouLoop still pending).
+- **Consequence that forced the cutover:** pulling the Nooelec left op25 pointed
+  at a dead `rtl-2838` (:55005, `remote:driver=rtlsdr`) — scanner was deaf. The
+  discone moving to the R2 is the long-planned R2 cutover, now mandatory.
+- **Registry (devices.json):** `airspy-r2` present:true, `rtl-2838` present:false,
+  `hf-plus` present:true (feed=whip interim). dx-R2 `_antenna_ports` Antenna B now
+  **empty**. rtl-v4 stays absent with a note its Meteor antenna is gone.
+- **Pi (pi-acquisition re-applied):** added a **SoapyAirspyHF build-if-absent**
+  block to the provisioner (Debian ships no `soapysdr-module-airspyhf`, but
+  `libairspyhf-dev` IS in apt → source build of pothosware/SoapyAirspyHF). HF+ now
+  enumerates (driver=airspyhf, HF 9 kHz–31 MHz). Laid down `sdr-source@airspy-r2`
+  (:55003) + `sdr-source@hf-plus` (:55002); both **enabled+active**.
+  `sdr-source@rtl-2838` **disabled+stopped** (dongle gone). Boot-enabled sources
+  now: dx-r2, airspy-r2, hf-plus.
+- **Scanner (scanner-compute re-applied):** `active_source` auto-flipped to
+  `airspy-r2` (sorts first). source env → :55003, remote:driver=airspy, CS16,
+  2.5 Msps. **op25 gain fix (manual, .83):** `run-op25.sh` GAINS was the R820T
+  `TUNER:38` element — the Airspy has **LNA/MIX/VGA (0–15 each)**, so set
+  `GAINS="LNA:14,MIX:12,VGA:11"` (backup `run-op25.sh.rtl-bak`).
+- **THE WALL + THE FIX — `rtltcp-bridge.service` (NEW).** op25 first decoded **0
+  TSBKs** (`tsbks: 0` in the op25 terminal; scanner-api's "monitoring control
+  channel" is MISLEADING — it goes fresh on any periodic trunk_update, NOT on real
+  TSBK decode, so use `tsbks` from the terminal as the truth signal). Diagnosis:
+  1. **RF is excellent** — local `rx_sdr` shows the CC C4FM at **~34–39 dB SNR**;
+     the DC spike is 32 dB *below* the CC at adequate gain. Gain, a TSV
+     center-offset, and the gain-element fix were all red herrings.
+  2. **`rx_sdr` (tight read loop) streams the R2 fine** (full 2.5 Msps to .84 +
+     Pi loopback). Device + transport are OK. (NB my early python `readStream`
+     probe returned 0 even on .84 where rx_sdr works — the probe was buggy, a
+     red herring; don't trust it.)
+  3. **`gr-osmosdr` (op25's reader) CANNOT sustain the R2's 80 Mbps stream** — an
+     isolated osmosdr flowgraph stalls after ~128K samples. It won't forward
+     `remote:prot=tcp` to the stream (stays lossy UDP) and won't trunk from a
+     `file=` source (op25 exits/idles). The scanner analog of the rx_fm wall.
+  - **FIX = `rtltcp_bridge.py` + `rtltcp-bridge.service` on .83.** A tight-loop
+     SoapySDR reader (the `wbfm_stream.py` pattern: CS16, **prot=tcp as a STREAM
+     arg** — the thing gr-osmosdr can't do) that re-serves the R2 to op25 over the
+     **rtl_tcp protocol** as CU8 (~40 Mbps, the RTL profile op25 was happy with).
+     op25's `--args rtl_tcp=127.0.0.1:1234` is a robust *tunable* source, so
+     SET_FREQ retunes propagate → **full trunk-following works**. Verified live:
+     tsbks 600→960+, system fully decoded (NAC 0x1CC, WACN 0xBEE00, SYSID 0x1CE,
+     769.16875/799.16875), fresh calls followed (TG 57/6708/6711). Gain is
+     server-side in the bridge (`IQ_GAINS=LNA:15,MIX:15,VGA:15`, CU8_SHIFT=8 = no
+     clip). All services active+enabled: `rtltcp-bridge`, `op25-ems` (drop-in
+     `Requires=rtltcp-bridge`), `op25-watch.timer`, `ems-stream`.
+  - **Provisioner integrated (re-provision safe):** scanner-compute now lays down
+     `rtltcp_bridge.py` (module file, embedded via `file()`), the bridge unit
+     (EnvironmentFile = active source env + `rtltcp-bridge.env`), the op25-ems
+     drop-in, and `run-op25.sh` → rtl_tcp. Validated + plan-rendered; NOT applied
+     (live already matches; apply would needlessly blip the scanner).
+- **HF+ is served but NOT yet consumed.** radio-compute's AM branch
+  (`am_stream.py`) still hardcodes `source-dx-r2.env` (Antenna C long-wire).
+  Moving AM onto the HF+ is a **deliberate radio-compute follow-up** (it touches
+  the live FM stream.sh) — deferred; the whip is interim anyway.
+- **Terraform fix:** `radio-compute` + `scanner-compute` `var.devices`
+  `map(any)` → **`any`**. Registry device objects are heterogeneous (dx-r2 has
+  `_antenna_ports`/`sample_rate_max`; hf-plus doesn't), so `map()` can't unify
+  them once a domain has >1 present device — `validate` failed on radio_devices.
+  Modules only use for/keys, which work on an object.
+- **wxsat paused:** `wxsat-scheduler.service` **disabled+stopped** on the Pi (the
+  dipole + Sawbird that fed the Meteor path are gone; no RTL v4). The Pi
+  **sdr-tuner is untouched** — it's still the wxsat backend (the .84 tuner proxies
+  `/api/wxsat/*` to it) and serves past captures; only new automated captures stop.
+- **FM untouched:** dx-R2 Antenna A FM (sdr-source@dx-r2 :55001) ran throughout;
+  pi-acquisition is build-if-absent and never restarts live sources.
+
+## 2026-06-14 — wxsat UI fix (proxy + delete), V2 cleanup pass
 
 **State: V2 FM LIVE on .84, now STEREO + 256k. wxsat web UI now works on
 radio.rg2.io; web-UI delete fixed.**
