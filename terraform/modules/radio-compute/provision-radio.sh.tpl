@@ -522,6 +522,59 @@ systemctl daemon-reload
 systemctl enable wx-stream.service >/dev/null 2>&1 || true
 systemctl restart wx-stream.service || true
 
+echo "==> NOAA Weather Radio SAME alert decoder + page (wx.rg2.io)"
+# Decodes SAME/EAS alerts off /wx.mp3 (ffmpeg | multimon-ng EAS), serves a weather
+# page with a live alert banner, and on an alert fires a webhook (Home Assistant)
+# + logs it. NPM wx.rg2.io -> this host:8090. Set HA_WEBHOOK_URL in wx-alert.env.
+if ! command -v multimon-ng >/dev/null 2>&1; then
+  apt-get install -y -qq multimon-ng || echo "    WARN: multimon-ng install failed (SAME decode disabled)"
+fi
+mkdir -p /var/lib/radio-compute && chown radio:radio /var/lib/radio-compute
+if [ -f /opt/sdr-tuner/wx_alert.py ]; then
+  echo "    wx_alert.py exists - keeping it"
+else
+  cat > /opt/sdr-tuner/wx_alert.py <<'PYEOF'
+${wx_alert_py}
+PYEOF
+  chmod +x /opt/sdr-tuner/wx_alert.py
+fi
+if [ -f /etc/radio-compute/wx-alert.env ]; then
+  echo "    wx-alert.env exists - keeping it"
+else
+  cat > /etc/radio-compute/wx-alert.env <<'EOF'
+# wx.rg2.io page + SAME alert decoder. Set HA_WEBHOOK_URL to a Home Assistant
+# webhook (e.g. https://ha.rg2.io/api/webhook/<id>) to announce alerts on house
+# speakers / push. Empty = banner + log only.
+WX_PORT=8090
+WX_DECODE_URL=http://192.168.6.82:8000/wx.mp3
+WX_PUBLIC_URL=https://icecast.rg2.io/wx.mp3
+HA_WEBHOOK_URL=
+EOF
+  chmod 0640 /etc/radio-compute/wx-alert.env
+  chown root:radio /etc/radio-compute/wx-alert.env 2>/dev/null || true
+fi
+cat > /etc/systemd/system/wx-alert.service <<'EOF'
+[Unit]
+Description=NOAA Weather Radio page + SAME alert decoder (wx.rg2.io)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=radio
+Group=radio
+EnvironmentFile=/etc/radio-compute/wx-alert.env
+ExecStart=/usr/bin/python3 /opt/sdr-tuner/wx_alert.py
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable wx-alert.service >/dev/null 2>&1 || true
+systemctl restart wx-alert.service || true
+
 echo "==> provisioning complete (toolchain staged; no units, nothing started)"
 echo "    csdr=$(command -v csdr || echo missing) nrsc5=$(command -v nrsc5 || echo missing) satdump=$(command -v satdump || echo missing)"
 %{ for id, dev in devices ~}

@@ -253,51 +253,44 @@ IQ_FREQ=769168750
 EOF
 fi
 
-echo "==> ATC airband (on-demand AM on the R2; preempts P25 -> /scanner-atc.mp3)"
-# atc-listen@<freq>.service stops op25 + the bridge to free the R2, AM-demods one
-# airband channel (atc_stream.py — the wbfm_stream pattern, prot=tcp), publishes
-# /scanner-atc.mp3, and auto-returns to P25 after RuntimeMaxSec (or on stop).
-# scanner-api (.83) drives it; the sudoers drop-in lets that user start/stop it.
-if [ -f /opt/scanner-compute/atc_stream.py ]; then
-  echo "    atc_stream.py exists - keeping it"
+echo "==> on-demand FM/AM monitor (the V1 tuner; preempts P25 -> /scanner-atc.mp3)"
+# monitor.service stops op25 + the bridge to free the R2, NFM/AM-demods one
+# channel (monitor_stream.py — the wbfm_stream pattern, prot=tcp) per the runtime
+# params scanner-api writes to /var/lib/scanner-compute/monitor.env, publishes
+# /scanner-atc.mp3, and auto-returns to P25 after RuntimeMaxSec or on stop.
+# (Supersedes the per-freq atc-listen@ template — clean it up on re-provision.)
+systemctl stop 'atc-listen@*' 2>/dev/null || true
+rm -f /etc/systemd/system/atc-listen@.service /etc/sudoers.d/scanner-atc \
+      /opt/scanner-compute/atc-listen.sh /opt/scanner-compute/atc_stream.py \
+      /etc/scanner-compute/atc.env
+if [ -f /opt/scanner-compute/monitor_stream.py ]; then
+  echo "    monitor_stream.py exists - keeping it"
 else
-  cat > /opt/scanner-compute/atc_stream.py <<'PYEOF'
-${atc_stream_py}
+  cat > /opt/scanner-compute/monitor_stream.py <<'PYEOF'
+${monitor_stream_py}
 PYEOF
-  chmod +x /opt/scanner-compute/atc_stream.py
+  chmod +x /opt/scanner-compute/monitor_stream.py
 fi
-if [ -f /etc/scanner-compute/atc.env ]; then
-  echo "    atc.env exists - keeping it"
+if [ -f /opt/scanner-compute/monitor-tune.sh ]; then
+  echo "    monitor-tune.sh exists - keeping it"
 else
-  cat > /etc/scanner-compute/atc.env <<'EOF'
-# ATC airband AM listen on the R2 (discone). Hand-tunable. Airband AM is weaker
-# than the P25 CC, so gain runs hotter; squelch gates noise between transmissions.
-ATC_GAINS=LNA:14,MIX:13,VGA:14
-ATC_SQUELCH=0.005
-SOAPY_ARGS=driver=remote,remote=tcp://radio.srvr:55003,remote:driver=airspy
-EOF
-fi
-if [ -f /opt/scanner-compute/atc-listen.sh ]; then
-  echo "    atc-listen.sh exists - keeping it"
-else
-  cat > /opt/scanner-compute/atc-listen.sh <<'EOF'
+  cat > /opt/scanner-compute/monitor-tune.sh <<'EOF'
 #!/usr/bin/env bash
-# ATC airband AM (atc_stream.py on the R2) -> mp3 -> rack Icecast /scanner-atc.mp3.
-# Env (ICECAST_*, ATC_*, SOAPY_ARGS) is injected by the unit's EnvironmentFiles
-# (icecast.env is root-only, so the unit reads it as root — do NOT source here).
+# On-demand FM/AM monitor: monitor_stream.py (R2) -> mp3 -> rack Icecast
+# /scanner-atc.mp3. MON_* (from monitor.env) + ICECAST_* (root-only icecast.env)
+# are injected by the unit's EnvironmentFiles — do NOT source them here.
 set -euo pipefail
-export ATC_FREQ="$${1:?usage: atc-listen.sh <freq_hz>}"
-exec bash -c "LD_LIBRARY_PATH=/usr/local/lib python3 /opt/scanner-compute/atc_stream.py | \
+exec bash -c "LD_LIBRARY_PATH=/usr/local/lib python3 /opt/scanner-compute/monitor_stream.py | \
   ffmpeg -hide_banner -loglevel error -f s16le -ar 12500 -ac 1 -i - \
-    -codec:a libmp3lame -b:a 24k -content_type audio/mpeg -ice_name 'ATC' -f mp3 \
+    -codec:a libmp3lame -b:a 24k -content_type audio/mpeg -ice_name 'Monitor' -f mp3 \
     icecast://source:$${ICECAST_SOURCE_PASSWORD}@$${ICECAST_HOST}:$${ICECAST_PORT}/scanner-atc.mp3"
 EOF
-  chmod +x /opt/scanner-compute/atc-listen.sh
+  chmod +x /opt/scanner-compute/monitor-tune.sh
 fi
 
-cat > /etc/systemd/system/atc-listen@.service <<'EOF'
+cat > /etc/systemd/system/monitor.service <<'EOF'
 [Unit]
-Description=ATC airband listen @ %i Hz (on-demand; preempts P25)
+Description=On-demand FM/AM monitor on the R2 (preempts P25)
 Conflicts=op25-ems.service rtltcp-bridge.service
 After=network-online.target
 
@@ -307,23 +300,23 @@ User=scanner
 Group=scanner
 Environment=LD_LIBRARY_PATH=/usr/local/lib
 EnvironmentFile=/etc/scanner-compute/icecast.env
-EnvironmentFile=/etc/scanner-compute/atc.env
+EnvironmentFile=-/var/lib/scanner-compute/monitor.env
 ExecStartPre=+/usr/bin/systemctl stop op25-watch.timer op25-ems rtltcp-bridge
 ExecStartPre=/bin/sleep 2
-ExecStart=/opt/scanner-compute/atc-listen.sh %i
-RuntimeMaxSec=600
+ExecStart=/opt/scanner-compute/monitor-tune.sh
+RuntimeMaxSec=1800
 TimeoutStopSec=15
 ExecStopPost=+/usr/bin/systemctl restart rtltcp-bridge
 ExecStopPost=+/usr/bin/systemctl restart op25-ems
 ExecStopPost=+/usr/bin/systemctl start op25-watch.timer
 EOF
 
-# Let scanner-api (User=scanner) drive ATC start/stop.
-cat > /etc/sudoers.d/scanner-atc <<'EOF'
-scanner ALL=(root) NOPASSWD: /usr/bin/systemctl start atc-listen@*, /usr/bin/systemctl stop atc-listen@*, /usr/bin/systemctl is-active atc-listen@*
+# scanner-api (User=scanner) writes monitor.env then restarts/stops the unit.
+cat > /etc/sudoers.d/scanner-monitor <<'EOF'
+scanner ALL=(root) NOPASSWD: /usr/bin/systemctl restart monitor.service, /usr/bin/systemctl stop monitor.service, /usr/bin/systemctl start monitor.service
 EOF
-chmod 0440 /etc/sudoers.d/scanner-atc
-visudo -cf /etc/sudoers.d/scanner-atc >/dev/null || { echo "FATAL: bad scanner-atc sudoers"; rm -f /etc/sudoers.d/scanner-atc; exit 1; }
+chmod 0440 /etc/sudoers.d/scanner-monitor
+visudo -cf /etc/sudoers.d/scanner-monitor >/dev/null || { echo "FATAL: bad scanner-monitor sudoers"; rm -f /etc/sudoers.d/scanner-monitor; exit 1; }
 
 # Liquidsoap, NOT bare ffmpeg: op25 emits UDP PCM only DURING calls, so a
 # plain ffmpeg chain stalls between calls and Icecast drops the source

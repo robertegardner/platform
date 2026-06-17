@@ -31,7 +31,7 @@
     },
     "/scanner-atc.mp3": {
       "domain": "scanner",
-      "source": "ATC audio, on-demand only — preempts P25 on the R2 (discone) when requested; not a continuous mount"
+      "source": "on-demand FM/AM monitor (the V1 tuner — NOAA WX/Marine/EMS NFM, aviation AM) on the R2 (discone); preempts P25 when active, not continuous"
     },
     "/fm-duck.mp3": {
       "domain": "radio",
