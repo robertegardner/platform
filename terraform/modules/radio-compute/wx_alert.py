@@ -64,17 +64,23 @@ def parse_same(header):
         areas = [p for p in parts[3:] if p]
         tbits = tail.split("-")            # TTTT, JJJHHMM, LLLLLLLL
         duration, issued, station = tbits[0], tbits[1], (tbits[2] if len(tbits) > 2 else "")
+        ts = int(time.time())
+        try:                               # +TTTT purge time is HHMM
+            dur_secs = int(duration[:2]) * 3600 + int(duration[2:]) * 60
+        except (ValueError, IndexError):
+            dur_secs = 1800
         return {
             "event_code": event,
             "event": EVENT_NAMES.get(event, event),
             "org": org, "areas": areas, "duration": duration,
             "issued": issued, "station": station,
             "priority": event in HIGH_PRIORITY,
-            "raw": h, "ts": int(time.time()),
+            "raw": h, "ts": ts, "expires": ts + (dur_secs or 1800),
         }
     except (IndexError, ValueError):
+        ts = int(time.time())
         return {"event_code": "???", "event": "Unparsed SAME", "raw": h,
-                "priority": False, "areas": [], "ts": int(time.time())}
+                "priority": False, "areas": [], "ts": ts, "expires": ts + 1800}
 
 
 def fire_webhook(alert):
@@ -215,6 +221,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif self.path == "/api/alert":
             with _LOCK:
+                a = STATE["active"]
+                if a and a.get("expires") and time.time() > a["expires"]:
+                    STATE["active"] = None     # warning's valid-time has passed
                 self._json(200, dict(STATE))
         else:
             self._json(404, {"error": "not found"})
@@ -224,10 +233,12 @@ class Handler(BaseHTTPRequestHandler):
         if length:
             self.rfile.read(length)
         if self.path == "/api/test":
+            now = int(time.time())
             handle_alert({"event_code": "RWT", "event": "Required Weekly Test (manual)",
                           "org": "WXR", "areas": ["029031"], "duration": "0015",
                           "issued": "", "station": "TEST", "priority": False,
-                          "raw": "ZCZC-WXR-RWT-029031+0015-TEST-", "ts": int(time.time())})
+                          "raw": "ZCZC-WXR-RWT-029031+0015-TEST-",
+                          "ts": now, "expires": now + 30})  # short so the demo clears
             self._json(200, {"ok": True})
         else:
             self._json(404, {"error": "not found"})
