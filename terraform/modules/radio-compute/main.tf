@@ -129,6 +129,7 @@ locals {
     icecast_source_password = var.icecast_source_password
     pi_host                 = var.pi_host
     noaa_stream_py          = file("${path.module}/noaa_stream.py")
+    wx_alert_py             = file("${path.module}/wx_alert.py")
   })
 }
 

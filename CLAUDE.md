@@ -302,6 +302,17 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   (on-demand AM on the R2, **preempts P25**, auto-returns after 10 min →
   `/scanner-atc.mp3`). NEVER point it at the Pi's old scheduler — its
   MOSWIN job USB-resets the dongle out from under sdr-source@rtl-2838.
+- `wx.rg2.io` → **192.168.6.84:8090** (`wx-alert.service` on radio-compute — a
+  NOAA Weather Radio page: `/wx.mp3` player + a live **SAME/EAS alert banner**.
+  Decodes alerts off `/wx.mp3` (`ffmpeg | multimon-ng -a EAS`); on an alert fires
+  a webhook (`HA_WEBHOOK_URL` in `wx-alert.env` → Home Assistant, for house
+  speakers/push) + logs. NPM host created (clone of radio.rg2.io); **needs a DNS
+  record for wx.rg2.io.** `POST /api/test` injects a test alert.)
+- `ems.rg2.io` now serves the **V1-style amber-LCD tuner** at `/` (NFM/AM presets
+  NOAA WX/Marine/EMS/KCGI-Tower-125.525/Memphis-Center, squelch, direct tune) →
+  `/api/monitor/{tune,stop}` → `monitor.service` (NFM/AM on the R2, **preempts
+  P25**, auto-returns after 30 min → `/scanner-atc.mp3`). Supersedes the
+  per-freq `atc-listen@` template.
 - `p25.rg2.io` → radio.srvr:8081 (the V1 scanner UI in READ-ONLY mode:
   /listen plays the live op25 feed with captions + the V1 archive pages.
   `SCANNER_UI_READONLY=true` makes it proxy the .83 bridge — it cannot

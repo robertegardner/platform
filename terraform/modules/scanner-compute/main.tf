@@ -136,7 +136,7 @@ locals {
     icecast_source_password = var.icecast_source_password
     whisper_token           = var.whisper_token
     rtltcp_bridge_py        = file("${path.module}/rtltcp_bridge.py")
-    atc_stream_py           = file("${path.module}/atc_stream.py")
+    monitor_stream_py       = file("${path.module}/monitor_stream.py")
   })
 }
 
