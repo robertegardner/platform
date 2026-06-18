@@ -318,6 +318,87 @@ EOF
 chmod 0440 /etc/sudoers.d/scanner-monitor
 visudo -cf /etc/sudoers.d/scanner-monitor >/dev/null || { echo "FATAL: bad scanner-monitor sudoers"; rm -f /etc/sudoers.d/scanner-monitor; exit 1; }
 
+echo "==> R2-mode coordinator (NOAA 162.550 on the discone + single-authority switch)"
+# The discone/R2 is single-tuner: NOAA / P25 / ATC are mutually exclusive.
+# r2-mode.sh is the single authority — stop all R2 users, BOUNCE the Pi source
+# fresh (it degrades on client switches: op25 runs deaf otherwise), then start the
+# requested mode. wx-on-r2.service is NOAA (NFM 162.550 -> /wx.mp3) via the same
+# monitor_stream the airband monitor uses. scanner-api exposes /api/r2/{state,mode}.
+# NOTE (manual, not provisioned — security): the bounce SSHes .83 root -> the Pi as
+# a FORCED-COMMAND key authorized only to `systemctl restart sdr-source@airspy-r2`
+# (Pi ~rgardner/.ssh/authorized_keys + /etc/sudoers.d/r2-bounce on the Pi). Boot
+# enablement (NOAA-default vs op25-default) is left as-is; flip deliberately.
+if [ -f /opt/scanner-compute/wx-on-r2.sh ]; then
+  echo "    wx-on-r2.sh exists - keeping it"
+else
+  cat > /opt/scanner-compute/wx-on-r2.sh <<'E'
+#!/usr/bin/env bash
+# NOAA Weather Radio on the R2/discone -> rack Icecast /wx.mp3. SOAPY_ARGS/MON_*/
+# ICECAST_* injected by the unit's env (Environment= + icecast.env).
+set -euo pipefail
+exec bash -c "LD_LIBRARY_PATH=/usr/local/lib python3 /opt/scanner-compute/monitor_stream.py | \
+  ffmpeg -hide_banner -loglevel error -f s16le -ar 12500 -ac 1 -i - \
+    -codec:a libmp3lame -b:a 24k -content_type audio/mpeg -ice_name 'NOAA WX (discone)' -f mp3 \
+    icecast://source:$${ICECAST_SOURCE_PASSWORD}@$${ICECAST_HOST}:$${ICECAST_PORT}/wx.mp3"
+E
+  chmod +x /opt/scanner-compute/wx-on-r2.sh
+fi
+cat > /etc/systemd/system/wx-on-r2.service <<'E'
+[Unit]
+Description=NOAA Weather Radio on the R2/discone (NFM 162.550 -> /wx.mp3)
+Conflicts=op25-ems.service rtltcp-bridge.service monitor.service
+After=network-online.target
+[Service]
+Type=simple
+User=scanner
+Group=scanner
+Environment=SOAPY_ARGS=driver=remote,remote=tcp://radio.srvr:55003,remote:driver=airspy
+Environment=MON_FREQ=162550000
+Environment=MON_MODE=nfm
+Environment=MON_GAINS=LNA:14,MIX:13,VGA:14
+Environment=MON_SQUELCH=0.0001
+EnvironmentFile=/etc/scanner-compute/icecast.env
+ExecStart=/opt/scanner-compute/wx-on-r2.sh
+Restart=always
+RestartSec=8
+[Install]
+WantedBy=multi-user.target
+E
+if [ -f /opt/scanner-compute/r2-mode.sh ]; then
+  echo "    r2-mode.sh exists - keeping it"
+else
+  cat > /opt/scanner-compute/r2-mode.sh <<'E'
+#!/usr/bin/env bash
+# Single authority for the R2/discone source. Stops all R2 users, bounces the Pi
+# source fresh (forced-command key; degrades on switches), then starts the mode.
+set -uo pipefail
+MODE="$${1:-}"
+ALL="wx-on-r2.service monitor.service op25-watch.timer op25-ems.service rtltcp-bridge.service"
+systemctl stop $ALL 2>/dev/null || true
+sleep 2
+if timeout 12 ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i /root/.ssh/id_ed25519 rgardner@radio.srvr bounce 2>/dev/null; then
+  echo "r2-mode: R2 source bounced fresh"
+else
+  echo "r2-mode: WARN source bounce failed (op25 may run deaf)" >&2
+fi
+sleep 5
+case "$MODE" in
+  noaa) systemctl reset-failed wx-on-r2.service 2>/dev/null || true; systemctl start wx-on-r2.service ;;
+  p25)  systemctl reset-failed rtltcp-bridge.service op25-ems.service 2>/dev/null || true
+        systemctl start rtltcp-bridge.service op25-ems.service op25-watch.timer ;;
+  *)    echo "usage: r2-mode.sh {noaa|p25}" >&2; exit 2 ;;
+esac
+echo "r2-mode -> $MODE"
+E
+  chmod +x /opt/scanner-compute/r2-mode.sh
+fi
+cat > /etc/sudoers.d/scanner-r2mode <<'E'
+scanner ALL=(root) NOPASSWD: /opt/scanner-compute/r2-mode.sh noaa, /opt/scanner-compute/r2-mode.sh p25
+E
+chmod 0440 /etc/sudoers.d/scanner-r2mode
+visudo -cf /etc/sudoers.d/scanner-r2mode >/dev/null || { echo "FATAL: bad scanner-r2mode sudoers"; rm -f /etc/sudoers.d/scanner-r2mode; exit 1; }
+systemctl daemon-reload
+
 # Liquidsoap, NOT bare ffmpeg: op25 emits UDP PCM only DURING calls, so a
 # plain ffmpeg chain stalls between calls and Icecast drops the source
 # (proven 2026-06-10). audio.py bridges the UDP audio to stdout and mksafe
