@@ -149,6 +149,7 @@ locals {
     wxsat_predict_py   = file("${path.module}/wxsat_predict.py")
     wxsat_scheduler_py = file("${path.module}/wxsat_scheduler.py")
     wxsat_capture_sh   = file("${path.module}/wxsat_capture_rack.sh")
+    wxsat_live_py      = file("${path.module}/wxsat_live.py")
   })
 }
 

@@ -62,9 +62,19 @@ cleanup() {
     fi
   fi
   [[ "$KEEP_IQ" != "1" ]] && rm -f "$IQ"
+  [[ -n "${LIVE_PID:-}" ]] && kill "$LIVE_PID" 2>/dev/null || true
   return 0
 }
 trap cleanup EXIT INT TERM
+
+# Live telemetry sidecar for the /wxsat page (FFT/waterfall + sky track while
+# recording, decode sync while decoding). Best-effort, read-only on the IQ —
+# never affects the capture; the trap kills it on any exit. Reads WXSAT_AOS/LOS/
+# SAT/NORAD from our env (set by the scheduler) for the satellite track.
+if [ -f /opt/wxsat/wxsat_live.py ]; then
+  python3 /opt/wxsat/wxsat_live.py &
+  LIVE_PID=$!
+fi
 
 # Seed SatDump's TLEs from our cache so georeferenced products have fresh elements.
 mkdir -p "$HOME/.config/satdump"

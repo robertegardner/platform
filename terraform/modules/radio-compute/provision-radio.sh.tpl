@@ -286,9 +286,104 @@ fi
 
 echo "==> sudoers: the tuner UI may control sdr-fm@active"
 cat > /etc/sudoers.d/radio-tuner <<'EOF'
-radio ALL=(root) NOPASSWD: /usr/bin/systemctl start sdr-fm@active, /usr/bin/systemctl stop sdr-fm@active, /usr/bin/systemctl restart sdr-fm@active, /usr/bin/systemctl start sdr-scan.service, /usr/bin/systemctl stop sdr-scan.service, /usr/bin/systemctl start sdr-am-scan.service, /usr/bin/systemctl stop sdr-am-scan.service
+radio ALL=(root) NOPASSWD: /usr/bin/systemctl start sdr-fm@active, /usr/bin/systemctl stop sdr-fm@active, /usr/bin/systemctl restart sdr-fm@active, /usr/bin/systemctl start sdr-scan.service, /usr/bin/systemctl stop sdr-scan.service, /usr/bin/systemctl start sdr-am-scan.service, /usr/bin/systemctl stop sdr-am-scan.service, /usr/bin/systemctl start am-compare-a.service, /usr/bin/systemctl stop am-compare-a.service, /usr/bin/systemctl start am-compare-b.service, /usr/bin/systemctl stop am-compare-b.service, /usr/bin/systemctl start fm-watch.timer, /usr/bin/systemctl stop fm-watch.timer
 EOF
 chmod 0440 /etc/sudoers.d/radio-tuner
+
+echo "==> live A/B comparison units (HF+ vs dx-R2/B -> /am-{a,b}.mp3; app.py /api/abcompare/*)"
+if [ -f /opt/sdr-tuner/am-compare.sh ]; then
+  echo "    am-compare.sh exists - keeping it"
+else
+  cat > /opt/sdr-tuner/am-compare.sh <<'EOF'
+#!/bin/bash
+# Live A/B side: AM-demod one station on one device -> /am-$1.mp3 (a=HF+ YouLoop
+# 48k, b=dx-R2 Antenna B 50k). app.py /api/abcompare/* writes the per-side env
+# (SOURCE/FREQ/GAIN/ANTENNA) read via AM_ACTIVE_ENV; ICECAST_PASS from active.env.
+set -euo pipefail
+SIDE="$1"
+ENVF="/etc/sdr-streams/am-compare-$SIDE.env"
+source <(grep '^ICECAST_PASS=' /etc/sdr-streams/active.env)
+SRC=$(grep '^SOURCE=' "$ENVF" | cut -d= -f2 | tr -d '"')
+AR=50000; [ "$SRC" = "hf-plus" ] && AR=48000
+export AM_ACTIVE_ENV="$ENVF"
+exec bash -c "python3 /opt/sdr-tuner/am_stream.py 2>/tmp/am-compare-$SIDE.log | \
+  ffmpeg -hide_banner -loglevel error -f s16le -ar $AR -ac 1 -i - \
+    -af 'highpass=f=300:p=2,lowpass=f=3800,dynaudnorm=framelen=500:gausssize=11:maxgain=6' \
+    -ar 48000 -ac 1 -c:a libmp3lame -b:a 64k -content_type audio/mpeg \
+    -f mp3 'icecast://source:$${ICECAST_PASS}@${icecast_host}:${icecast_port}/am-$SIDE.mp3'"
+EOF
+  chmod +x /opt/sdr-tuner/am-compare.sh
+fi
+cat > /etc/systemd/system/am-compare-a.service <<'EOF'
+[Unit]
+Description=AM A/B compare side a (HF+ YouLoop) -> /am-a.mp3
+After=network-online.target
+[Service]
+Type=simple
+User=radio
+Group=radio
+ExecStart=/opt/sdr-tuner/am-compare.sh a
+Restart=on-failure
+RestartSec=6
+EOF
+cat > /etc/systemd/system/am-compare-b.service <<'EOF'
+[Unit]
+Description=AM A/B compare side b (dx-R2 Antenna B, preempts FM) -> /am-b.mp3
+Conflicts=sdr-fm@active.service
+After=network-online.target
+[Service]
+Type=simple
+User=radio
+Group=radio
+ExecStart=/opt/sdr-tuner/am-compare.sh b
+Restart=on-failure
+RestartSec=6
+EOF
+
+echo "==> ATC recording: recorder unit + scheduler tick (1-min timer) + retention"
+# The app's /api/atc-rec/* write the schedule to here; the tick reconciles it
+# against the clock (tune ATC -> record /scanner-atc.mp3 -> back to NOAA -> prune).
+# atc-rec-tick.py + atc-record.sh ship with the app payload (deploy.sh).
+install -d -o radio -g radio /var/lib/sdr-streams/atc-rec
+cat > /etc/systemd/system/atc-record.service <<'EOF'
+[Unit]
+Description=ATC scheduled recording (icecast mount -> file)
+[Service]
+Type=simple
+User=radio
+Group=radio
+EnvironmentFile=/var/lib/sdr-streams/atc-rec/record.env
+ExecStart=/opt/sdr-tuner/atc-record.sh
+Restart=no
+EOF
+cat > /etc/systemd/system/atc-rec.service <<'EOF'
+[Unit]
+Description=ATC recording scheduler tick
+After=network-online.target
+[Service]
+Type=oneshot
+User=radio
+Group=radio
+ExecStart=/usr/bin/python3 /opt/sdr-tuner/atc-rec-tick.py
+EOF
+cat > /etc/systemd/system/atc-rec.timer <<'EOF'
+[Unit]
+Description=Run the ATC recording scheduler every minute
+[Timer]
+OnBootSec=45
+OnUnitActiveSec=60
+AccuracySec=10s
+[Install]
+WantedBy=timers.target
+EOF
+# the tick (User=radio) drives the recorder via sudo
+cat > /etc/sudoers.d/atc-rec <<'EOF'
+radio ALL=(root) NOPASSWD: /usr/bin/systemctl start atc-record.service, /usr/bin/systemctl stop atc-record.service, /usr/bin/systemctl restart atc-record.service
+EOF
+chmod 0440 /etc/sudoers.d/atc-rec
+systemctl daemon-reload
+systemctl enable atc-rec.timer >/dev/null 2>&1 || true
+systemctl start atc-rec.timer || true
 
 echo "==> systemd units (laid down + reloaded; enable/start is a manual switch step)"
 cat > /etc/systemd/system/sdr-fm@.service <<'EOF'
@@ -620,7 +715,10 @@ PYEOF
 cat > /opt/wxsat/wxsat_capture_rack.sh <<'EOF'
 ${wxsat_capture_sh}
 EOF
-chmod +x /opt/wxsat/wxsat_record_rtltcp.py /opt/wxsat/wxsat_scheduler.py /opt/wxsat/wxsat_capture_rack.sh
+cat > /opt/wxsat/wxsat_live.py <<'PYEOF'
+${wxsat_live_py}
+PYEOF
+chmod +x /opt/wxsat/wxsat_record_rtltcp.py /opt/wxsat/wxsat_scheduler.py /opt/wxsat/wxsat_capture_rack.sh /opt/wxsat/wxsat_live.py
 
 # Storage lives on the rack: products + the captures index + the TLE cache.
 install -d -o radio -g radio -m 0755 /var/lib/sdr-streams/wxsat /var/lib/sdr-streams/wxsat/tle

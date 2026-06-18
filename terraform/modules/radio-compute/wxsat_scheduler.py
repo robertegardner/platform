@@ -114,7 +114,11 @@ def do_capture(p, cfg):
                WXSAT_OUT_DIR=str(out_dir), WXSAT_DURATION=str(duration),
                WXSAT_SAMPLERATE=str(cfg["samplerate"]),
                WXSAT_FREQ_HZ=str(int(cfg["freq_mhz"] * 1e6)),
-               LRPT_PIPELINE=cfg["lrpt_pipeline"])
+               LRPT_PIPELINE=cfg["lrpt_pipeline"],
+               # Pass metadata for the live-telemetry sidecar's sky track.
+               WXSAT_AOS=str(int(p["aos_unix"])), WXSAT_LOS=str(int(p["los_unix"])),
+               WXSAT_SAT=str(p.get("satellite") or ""),
+               WXSAT_NORAD=str(p.get("norad") or ""))
     log.info("CAPTURE %s -> %s (%ss)", p["satellite"], out_dir, duration)
     write_status(cfg, "capturing", capturing=p)
     try:
