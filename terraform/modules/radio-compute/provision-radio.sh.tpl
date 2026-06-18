@@ -194,19 +194,19 @@ else
   cat > /etc/sdr-streams/tuner.env <<'EOF'
 # Used by the sdr-tuner UI to rewrite active.env when you tune a station.
 ICECAST_PASS=${icecast_source_password}
-# wxsat captures live only on the Pi (the scheduler needs the SDR). The rack
-# tuner proxies every /api/wxsat/* call here so radio.rg2.io shows the gallery.
-WXSAT_UPSTREAM=http://${pi_host}:8080
+# wxsat now runs ON the rack (the Meteor scheduler/captures below), so the tuner
+# serves /api/wxsat/* from its own /var/lib/sdr-streams/wxsat — no Pi proxy.
 EOF
   chown radio:radio /etc/sdr-streams/tuner.env
   chmod 0600 /etc/sdr-streams/tuner.env
 fi
 
-# tuner.env is keep-if-exists, so existing installs predate WXSAT_UPSTREAM —
-# ensure the line is present (idempotent) so the wxsat gallery proxies to the Pi.
-if ! grep -q '^WXSAT_UPSTREAM=' /etc/sdr-streams/tuner.env; then
-  echo "WXSAT_UPSTREAM=http://${pi_host}:8080" >> /etc/sdr-streams/tuner.env
-  echo "    tuner.env: added WXSAT_UPSTREAM (wxsat proxy to Pi)"
+# wxsat moved to the rack (2026-06-18 cutover). The tuner must NOT proxy
+# /api/wxsat/* to the Pi anymore — comment out any active WXSAT_UPSTREAM left
+# from the pre-rack-wxsat setup so radio.rg2.io/wxsat shows THESE captures.
+if grep -q '^WXSAT_UPSTREAM=' /etc/sdr-streams/tuner.env; then
+  sed -i 's|^WXSAT_UPSTREAM=|#WXSAT_UPSTREAM= (rack serves wxsat locally) |' /etc/sdr-streams/tuner.env
+  echo "    tuner.env: disabled WXSAT_UPSTREAM (rack is the wxsat backend)"
 fi
 
 if [ -f /opt/sdr-tuner/stream.sh ]; then
@@ -684,12 +684,10 @@ systemctl daemon-reload
 systemctl enable wxsat-scheduler.service >/dev/null 2>&1 || true
 systemctl restart wxsat-scheduler.service || true
 
-# GALLERY CUTOVER (deliberate, NOT automated here): radio.rg2.io/wxsat still
-# proxies /api/wxsat/* to the Pi via WXSAT_UPSTREAM in tuner.env. Once the rack
-# has real captures, unset WXSAT_UPSTREAM (and restart sdr-tuner) so the gallery
-# serves THESE local captures. Doing it before any rack capture would blank the
-# page, so it's left as an operator step (see docs/deployment_notes.md).
-echo "    wxsat-scheduler: $(systemctl is-active wxsat-scheduler.service 2>/dev/null) (DRY_RUN gates real captures; gallery cutover = unset WXSAT_UPSTREAM)"
+# GALLERY: the tuner.env block above already disabled WXSAT_UPSTREAM, so
+# radio.rg2.io/wxsat serves THESE rack captures (upcoming passes show at once;
+# images fill in as passes decode). Re-point at the Pi only for a rollback.
+echo "    wxsat-scheduler: $(systemctl is-active wxsat-scheduler.service 2>/dev/null) (DRY_RUN gates real captures; gallery serves rack-local /var/lib/sdr-streams/wxsat)"
 %{ endif ~}
 
 echo "==> provisioning complete (toolchain staged; no units, nothing started)"
