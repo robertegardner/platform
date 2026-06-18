@@ -57,6 +57,22 @@ else
   echo "    $BL present"
 fi
 
+# --- 2b) usbfs buffer for multi-dongle USB ----------------------------------
+# p24 streams 3 RTL dongles (2 ADS-B + the Nooelec). The default usbfs pool
+# (usbfs_memory_mb=16) is too small for them together -> rtl_tcp "Failed to
+# submit transfer", it resets every client, and a Meteor capture fails the same
+# way. Raise it persistently (tmpfiles.d applies it at boot, before the SDR
+# services) AND now. (USB power/signal -71 enumerate drops are a SEPARATE,
+# hardware issue — needs a powered hub.)
+US=/etc/tmpfiles.d/usbfs-sdr.conf
+if ! grep -qs usbfs_memory_mb "$US"; then
+  echo "w /sys/module/usbcore/parameters/usbfs_memory_mb - - - - 1000" > "$US"
+  echo "    wrote $US (usbfs_memory_mb=1000)"
+fi
+systemd-tmpfiles --create "$US" 2>/dev/null || \
+  echo 1000 > /sys/module/usbcore/parameters/usbfs_memory_mb 2>/dev/null || true
+echo "    usbfs_memory_mb=$(cat /sys/module/usbcore/parameters/usbfs_memory_mb 2>/dev/null)"
+
 # --- 3) (No EEPROM reflash) -------------------------------------------------
 # The Nooelec NESDR SMArt ships a FACTORY-UNIQUE serial (22012952), distinct
 # from p24's two ADS-B dongles (00000001 UAT, 00001090 1090), so there is no
