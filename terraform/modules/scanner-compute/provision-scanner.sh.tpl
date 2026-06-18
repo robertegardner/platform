@@ -290,8 +290,8 @@ fi
 
 cat > /etc/systemd/system/monitor.service <<'EOF'
 [Unit]
-Description=On-demand FM/AM monitor on the R2 (preempts P25)
-Conflicts=op25-ems.service rtltcp-bridge.service
+Description=On-demand FM/AM monitor on the R2 (coordinator-managed -> /scanner-atc.mp3)
+Conflicts=op25-ems.service rtltcp-bridge.service wx-on-r2.service
 After=network-online.target
 
 [Service]
@@ -301,15 +301,13 @@ Group=scanner
 Environment=LD_LIBRARY_PATH=/usr/local/lib
 EnvironmentFile=/etc/scanner-compute/icecast.env
 EnvironmentFile=-/var/lib/scanner-compute/monitor.env
-ExecStartPre=+/usr/bin/systemctl stop op25-watch.timer op25-ems rtltcp-bridge
-ExecStartPre=/bin/sleep 2
 ExecStart=/opt/scanner-compute/monitor-tune.sh
-RuntimeMaxSec=1800
-TimeoutStopSec=15
-ExecStopPost=+/usr/bin/systemctl restart rtltcp-bridge
-ExecStopPost=+/usr/bin/systemctl restart op25-ems
-ExecStopPost=+/usr/bin/systemctl start op25-watch.timer
+Restart=on-failure
+RestartSec=8
 EOF
+# NB: monitor.service no longer self-juggles op25 / auto-returns — the r2-mode
+# coordinator (below) owns ALL R2 stop/start + the Pi source bounce. scanner-api's
+# monitor_tune/stop delegate to r2-mode.sh (atc/noaa).
 
 # scanner-api (User=scanner) writes monitor.env then restarts/stops the unit.
 cat > /etc/sudoers.d/scanner-monitor <<'EOF'
@@ -386,14 +384,15 @@ case "$MODE" in
   noaa) systemctl reset-failed wx-on-r2.service 2>/dev/null || true; systemctl start wx-on-r2.service ;;
   p25)  systemctl reset-failed rtltcp-bridge.service op25-ems.service 2>/dev/null || true
         systemctl start rtltcp-bridge.service op25-ems.service op25-watch.timer ;;
-  *)    echo "usage: r2-mode.sh {noaa|p25}" >&2; exit 2 ;;
+  atc)  systemctl reset-failed monitor.service 2>/dev/null || true; systemctl start monitor.service ;;
+  *)    echo "usage: r2-mode.sh {noaa|p25|atc}" >&2; exit 2 ;;
 esac
 echo "r2-mode -> $MODE"
 E
   chmod +x /opt/scanner-compute/r2-mode.sh
 fi
 cat > /etc/sudoers.d/scanner-r2mode <<'E'
-scanner ALL=(root) NOPASSWD: /opt/scanner-compute/r2-mode.sh noaa, /opt/scanner-compute/r2-mode.sh p25
+scanner ALL=(root) NOPASSWD: /opt/scanner-compute/r2-mode.sh noaa, /opt/scanner-compute/r2-mode.sh p25, /opt/scanner-compute/r2-mode.sh atc
 E
 chmod 0440 /etc/sudoers.d/scanner-r2mode
 visudo -cf /etc/sudoers.d/scanner-r2mode >/dev/null || { echo "FATAL: bad scanner-r2mode sudoers"; rm -f /etc/sudoers.d/scanner-r2mode; exit 1; }
