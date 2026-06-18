@@ -261,13 +261,16 @@ if [[ "$MODE" == "wbfm" || "$MODE" == "fm" ]]; then
              -f mp3 '$ICECAST_URL'"
   fi
 elif [[ "$MODE" == "am" || "$MODE" == "nfm" ]]; then
-  # AM via am_stream.py: reads IQ from the remote dx-R2 (driver=remote, forced
-  # onto TCP), narrow 2-stage channel filter + FFT-locked synchronous demod,
-  # emits s16le mono @ 50k. Reads FREQ/GAIN/ANTENNA from active.env (ANTENNA
-  # defaults to the long-wire on Antenna C). No RDS on AM. ffmpeg trims the
-  # subsonics, telephone-bands the audio, and encodes mp3 to Icecast.
+  # AM via am_stream.py: reads IQ via SoapySDR (driver=remote, forced onto TCP),
+  # narrow 2-stage channel filter + FFT-locked synchronous demod. am_stream picks
+  # the device + HW rate from SOURCE in active.env: dx-r2 (2 MHz -> 50k out, ports
+  # A/B/C) or hf-plus (the YouLoop on :55002, 768k -> 48k out). Match ffmpeg's
+  # input rate to the source. Reads FREQ/GAIN/ANTENNA/SOURCE from active.env. No
+  # RDS on AM. ffmpeg trims subsonics, telephone-bands the audio, encodes to mp3.
+  AR=50000
+  [ "$${SOURCE:-dx-r2}" = "hf-plus" ] && AR=48000
   exec bash -c "python3 /opt/sdr-tuner/am_stream.py | \
-    ffmpeg -hide_banner -loglevel warning -f s16le -ar 50000 -ac 1 -i - \
+    ffmpeg -hide_banner -loglevel warning -f s16le -ar $AR -ac 1 -i - \
            -af 'highpass=f=50,lowpass=f=4800' \
            -ar 48000 -ac 1 \
            -c:a libmp3lame -b:a $BITRATE -content_type audio/mpeg \
@@ -434,17 +437,17 @@ EOF
 
 cat > /etc/systemd/system/sdr-am-scan.service <<'EOF'
 [Unit]
-Description=AM band scan (writes stations_am.json; interrupts FM for the sweep)
+Description=AM antenna survey (dx-R2 A/B/C + HF+ YouLoop -> stations_am.json; interrupts FM)
 After=network-online.target
 
 [Service]
 Type=oneshot
 User=radio
 Group=radio
-TimeoutStartSec=600
+TimeoutStartSec=900
 ExecStartPre=+/usr/bin/systemctl stop fm-watch.timer
 ExecStartPre=+/usr/bin/systemctl stop sdr-fm@active
-ExecStart=/usr/bin/python3 /opt/sdr-tuner/am_scan.py --antennas "Antenna A,Antenna B,Antenna C"
+ExecStart=/bin/bash /opt/sdr-tuner/am_scan_all.sh
 ExecStopPost=+/usr/bin/systemctl start sdr-fm@active
 ExecStopPost=+/usr/bin/systemctl start fm-watch.timer
 EOF

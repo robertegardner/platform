@@ -4,7 +4,54 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
-## 2026-06-17 (latest) — NOAA Weather Radio + on-demand ATC airband
+## 2026-06-18 (latest) — AM antenna selection (A/B/C/HF+) + HF+ YouLoop AM source
+
+**State: the rack radio tuner gained per-station AM antenna selection across the
+dx-R2 ports (A/B/C) AND the Airspy HF+ on the new YouLoop. Built + deployed live
+on .84 + validated; FM untouched. radio-repo branch `am-antenna-selection`
+(pushed, PR open). Platform side: `provision-radio.sh.tpl` only.**
+
+- **Hardware (user, 2026-06-17/18):** YouLoop on the HF+ (replaced the interim
+  whip → WX offline for now); AM loop + 9:1 balun on **dx-R2 Antenna B**. A
+  daylight `am_scan` survey across all three AM feeds confirmed per-station
+  winners differ (e.g. 960 KSIM + 1220 peak on the dx-R2 loop+balun; 1230 KZYM +
+  1550 peak on the YouLoop) — the empirical case for selectable antenna per
+  station. JSONs persisted on .84 `/var/lib/sdr-streams/surveys/` + codeserver
+  `~/am-surveys/`.
+- **HF+ AM is a new DSP path (de-risked first).** `am_stream.py` is now
+  **per-source profiled**: `dx-r2` (sdrplay @2 MHz → 50k out, ports A/B/C, +500k
+  offset + MW settings) vs `hf-plus` (airspyhf @768k → 48k out, RX, +30k offset,
+  no sdrplay settings), keyed off `SOURCE` in active.env. Proven by ear on the
+  YouLoop (960/1230/1550) before any UI was built. The HF+'s TCXO locks the PLL
+  at +0.00 Hz (vs the dx-R2's ~+800 Hz drift).
+- **Backend glue:** `app.py` `write_env` maps the antenna pick → `SOURCE` +
+  hardware antenna (HF+ → hf-plus/RX, **AM-only**; FM/HD always dx-R2);
+  `ALLOWED_ANTENNAS` gains "HF+"; `/api/tune` + `/tune` accept the antenna. The
+  rack `stream.sh` AM branch now sets ffmpeg `-ar` from `SOURCE` (50k dx-r2 / 48k
+  hf-plus) — patched in the **platform provisioner** (`provision-radio.sh.tpl`)
+  AND the live file. `source-hf-plus.env` auto-renders from the registry on the
+  next apply (created by hand on .84 for now).
+- **GUI (radio.html):** the ANT cycle-toggle → **discrete A / B / C / HF+
+  buttons** (HF+ lit on AM, greyed on FM); AM presets carry the antenna.
+- **Admin (index.html):** the AM table shows **per-antenna SNR columns
+  (A/B/C/HF+)** with the best highlighted, + a guarded **"Rescan Antennas"**
+  button (confirm: "interrupts FM ~1–2 min"). The rescan = `sdr-am-scan.service`
+  → NEW `am_scan_all.sh` (sweeps dx-R2 A/B/C, then the HF+ via the device-
+  targetable `am_scan.py`, merges by_antenna via NEW `am_scan_merge.py` with
+  RX→HF+ remap, picks best/station). FM stop/restore is the unit's
+  ExecStartPre/StopPost (unchanged).
+- **Validated live:** /api/tune to HF+ 1230 + dx-R2 B 960 wrote the right
+  active.env (SOURCE/ANTENNA/GAIN), am_stream picked the right device+rate, PLL
+  locked, /fm.mp3 200, FM restored. Full rescan merged 21 stations across
+  A/B/C/HF+ (960→B 43.2, 1550→HF+ 42.6, 1220→B 32.8, 1120→A 22.2, 1230→HF+ 18.9).
+- **Deploy:** hand-pushed to .84 (live); `deploy.sh --rack` updated to ship the 2
+  new scripts. **Known gap:** the scan's wx-stream stop is best-effort (no
+  sudoers grant; WX offline now). Single mount — auditioning AM still replaces FM
+  on /fm.mp3 (a dedicated always-on /am.mp3 for the contention-free HF+ is a
+  noted future option). Next: night sweep to re-rank the weak end; whip back for
+  WX when done.
+
+## 2026-06-17 — NOAA Weather Radio + on-demand ATC airband
 
 **State: NOAA WX radio LIVE on /wx.mp3 (HF+); on-demand ATC airband LIVE
 (/scanner-atc.mp3, preempts P25) with a scanner-api endpoint + ems.rg2.io UI
