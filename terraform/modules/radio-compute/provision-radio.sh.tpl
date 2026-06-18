@@ -339,7 +339,51 @@ ExecStart=/opt/sdr-tuner/am-compare.sh b
 Restart=on-failure
 RestartSec=6
 EOF
+
+echo "==> ATC recording: recorder unit + scheduler tick (1-min timer) + retention"
+# The app's /api/atc-rec/* write the schedule to here; the tick reconciles it
+# against the clock (tune ATC -> record /scanner-atc.mp3 -> back to NOAA -> prune).
+# atc-rec-tick.py + atc-record.sh ship with the app payload (deploy.sh).
+install -d -o radio -g radio /var/lib/sdr-streams/atc-rec
+cat > /etc/systemd/system/atc-record.service <<'EOF'
+[Unit]
+Description=ATC scheduled recording (icecast mount -> file)
+[Service]
+Type=simple
+User=radio
+Group=radio
+EnvironmentFile=/var/lib/sdr-streams/atc-rec/record.env
+ExecStart=/opt/sdr-tuner/atc-record.sh
+Restart=no
+EOF
+cat > /etc/systemd/system/atc-rec.service <<'EOF'
+[Unit]
+Description=ATC recording scheduler tick
+After=network-online.target
+[Service]
+Type=oneshot
+User=radio
+Group=radio
+ExecStart=/usr/bin/python3 /opt/sdr-tuner/atc-rec-tick.py
+EOF
+cat > /etc/systemd/system/atc-rec.timer <<'EOF'
+[Unit]
+Description=Run the ATC recording scheduler every minute
+[Timer]
+OnBootSec=45
+OnUnitActiveSec=60
+AccuracySec=10s
+[Install]
+WantedBy=timers.target
+EOF
+# the tick (User=radio) drives the recorder via sudo
+cat > /etc/sudoers.d/atc-rec <<'EOF'
+radio ALL=(root) NOPASSWD: /usr/bin/systemctl start atc-record.service, /usr/bin/systemctl stop atc-record.service, /usr/bin/systemctl restart atc-record.service
+EOF
+chmod 0440 /etc/sudoers.d/atc-rec
 systemctl daemon-reload
+systemctl enable atc-rec.timer >/dev/null 2>&1 || true
+systemctl start atc-rec.timer || true
 
 echo "==> systemd units (laid down + reloaded; enable/start is a manual switch step)"
 cat > /etc/systemd/system/sdr-fm@.service <<'EOF'
