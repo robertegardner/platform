@@ -627,13 +627,13 @@ WantedBy=timers.target
 EOF
 
 systemctl daemon-reload
-systemctl enable op25-watch.timer >/dev/null 2>&1 || true
-systemctl start op25-watch.timer || true
-# The bridge is enabled at boot (op25-ems Requires it). Harmless when up alone —
-# it only opens the remote R2 once op25 connects. op25-ems itself stays
-# laid-down-not-started (cutover enables it by hand), same as before.
-systemctl enable rtltcp-bridge.service >/dev/null 2>&1 || true
-systemctl restart rtltcp-bridge.service || true
+# Boot model (2026-06-18 flip): NOAA is the R2's 24/7 default (wx-on-r2 enabled);
+# P25/ATC are on-demand via r2-mode.sh, so the op25 chain + bridge + watchdog are
+# laid down but NOT boot-enabled — the coordinator starts op25-ems on demand (it
+# pulls rtltcp-bridge via Requires, and r2-mode.sh starts op25-watch.timer too).
+# Enablement only here; don't start/stop — the coordinator owns the running mode.
+systemctl enable wx-on-r2.service >/dev/null 2>&1 || true
+systemctl disable op25-ems.service rtltcp-bridge.service op25-watch.timer >/dev/null 2>&1 || true
 
 echo "==> provisioning complete (units laid down, not started — cutover enables them)"
 %{ for id, dev in devices ~}
