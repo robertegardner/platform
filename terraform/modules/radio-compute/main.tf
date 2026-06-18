@@ -73,7 +73,11 @@ resource "proxmox_virtual_environment_container" "radio_compute" {
   start_on_boot = true
 
   lifecycle {
-    ignore_changes = [tags]
+    # user_account.keys and template_file_id are create-only args the Proxmox
+    # API never returns on read, so re-importing this container (e.g. after a
+    # lost state file) would otherwise force a destroy/recreate. They don't
+    # change in practice — ignore them so `taint + apply` stays safe.
+    ignore_changes = [tags, initialization[0].user_account, operating_system[0].template_file_id]
   }
 }
 
@@ -122,6 +126,9 @@ locals {
     })
   }
 
+  # The wxsat domain holds exactly one device (the Nooelec on p24); null when absent.
+  wxsat_dev = try(one(values(var.wxsat_devices)), null)
+
   provision_script = templatefile("${path.module}/provision-radio.sh.tpl", {
     devices                 = local.devices_rendered
     icecast_host            = var.icecast_host
@@ -130,6 +137,18 @@ locals {
     pi_host                 = var.pi_host
     noaa_stream_py          = file("${path.module}/noaa_stream.py")
     wx_alert_py             = file("${path.module}/wx_alert.py")
+
+    # Weather-sat (Meteor LRPT) — rack decode of p24's rtl_tcp. Empty wxsat
+    # domain => wxsat_enabled false => the provisioner block is skipped.
+    wxsat_enabled      = local.wxsat_dev != null
+    wxsat_rtltcp_host  = try(local.wxsat_dev.host, "p24.srvr")
+    wxsat_rtltcp_port  = try(local.wxsat_dev.port, 1234)
+    wxsat_freq_hz      = try(local.wxsat_dev.freq_hz, 137900000)
+    wxsat_samplerate   = try(local.wxsat_dev.sample_rate_default, 1024000)
+    wxsat_record_py    = file("${path.module}/wxsat_record_rtltcp.py")
+    wxsat_predict_py   = file("${path.module}/wxsat_predict.py")
+    wxsat_scheduler_py = file("${path.module}/wxsat_scheduler.py")
+    wxsat_capture_sh   = file("${path.module}/wxsat_capture_rack.sh")
   })
 }
 

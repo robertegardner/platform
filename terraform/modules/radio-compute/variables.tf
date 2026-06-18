@@ -69,6 +69,12 @@ variable "devices" {
   type = any
 }
 
+variable "wxsat_devices" {
+  description = "Weather-sat (Meteor LRPT) devices from the registry (present only). Expected: the Nooelec on p24, served over rtl_tcp. Drives the rack wxsat scheduler/capture. Empty disables the wxsat block. `any` for the same heterogeneity reason as `devices`."
+  type        = any
+  default     = {}
+}
+
 variable "icecast_host" {
   description = "Rack Icecast host the radio domain publishes to (distribution LXC)"
   type        = string

@@ -74,7 +74,7 @@
       "usb_controller": "B"
     },
     "rtl-v4": {
-      "_comment": "NOT acquired yet (2026-06-16). The Meteor/NOAA path it would own is currently DARK — the V-dipole + Sawbird+ NOAA LNA were removed to the attic on 2026-06-16, and the Pi wxsat-scheduler is paused until an RTL v4 + antenna return. Feed/filter below describe the intended setup, not what is plugged in.",
+      "_comment": "NOT acquired yet (2026-06-16). The Meteor/NOAA path it would own is currently DARK — the V-dipole + Sawbird+ NOAA LNA were removed to the attic on 2026-06-16, and the Pi wxsat-scheduler is paused until an RTL v4 + antenna return. Feed/filter below describe the intended setup, not what is plugged in. SUPERSEDED for the Meteor role by nooelec-wx on p24 (the dipole moved there with the Nooelec) — kept for history.",
       "present": false,
       "soapy_args": "driver=rtlsdr",
       "antenna": "single",
@@ -88,6 +88,26 @@
       "port": 55004,
       "bias_tee": true,
       "usb_controller": "B"
+    },
+    "nooelec-wx": {
+      "_comment": "Nooelec NESDR SMArt v5 (RTL2838, Meteor V-dipole) on the OUTDOOR ADS-B Pi p24.srvr (192.168.6.141), NOT the radio acquisition Pi. Added 2026-06-17 alongside p24's two ADS-B dongles (1090 @ serial 00001090, UAT 978 @ serial 00000001). DEDICATED to weather-sat / NWR — never shared with ADS-B. p24 serves it to the rack as rtl_tcp (CU8); radio-compute's SatDump (librtltcp_support) decodes Meteor LRPT live over the LAN — all decode + storage on the rack. Serial is the FACTORY-UNIQUE 22012952 (NESDR SMARts ship unique — no collision with the ADS-B dongles, so no EEPROM reflash; selection is by this serial). dvb_usb_rtl28xxu is blacklisted so librtlsdr keeps it. The 'wxsat' domain keeps it out of radio-compute's existing radio_devices loops. NOTE 2026-06-18: p24's USB bus is power-marginal (repeated enumerate error -71) — needs a POWERED hub before it holds the dongle reliably.",
+      "present": true,
+      "host": "p24.srvr",
+      "soapy_args": "driver=rtlsdr",
+      "serial": "22012952",
+      "antenna": "single",
+      "feed": "V-dipole",
+      "filter": "none",
+      "role": "meteor-lrpt",
+      "domain": "wxsat",
+      "transport": "rtl-tcp",
+      "wire_format": "CU8",
+      "endpoint": "tcp://p24.srvr:1234",
+      "port": 1234,
+      "freq_hz": 137900000,
+      "sample_rate_default": 1024000,
+      "bias_tee": false,
+      "usb_controller": "p24"
     }
   }
 }

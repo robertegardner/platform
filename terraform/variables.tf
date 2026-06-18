@@ -139,6 +139,19 @@ variable "pi_ssh_user" {
   default     = "rgardner"
 }
 
+# --- Weather-sat acquisition node (outdoor ADS-B Pi, p24) ---------------------
+variable "wxsat_host" {
+  description = "Hostname/IP of the outdoor ADS-B Pi hosting the Nooelec/Meteor dipole. Use the IP since p24.srvr may not resolve from thebeast."
+  type        = string
+  default     = "192.168.6.141"
+}
+
+variable "wxsat_ssh_user" {
+  description = "SSH user on p24 (passwordless sudo for installs/systemctl)"
+  type        = string
+  default     = "rgardner"
+}
+
 variable "ssh_private_key_path" {
   description = "Private key thebeast's deploy user uses to reach the Pi"
   type        = string

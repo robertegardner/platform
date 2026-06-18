@@ -578,6 +578,120 @@ systemctl daemon-reload
 systemctl enable wx-alert.service >/dev/null 2>&1 || true
 systemctl restart wx-alert.service || true
 
+%{ if wxsat_enabled ~}
+echo "==> Weather-sat (Meteor LRPT) rack decoder — records p24's rtl_tcp -> SatDump"
+# The Nooelec (Meteor V-dipole) lives on the outdoor ADS-B Pi (p24) and is served
+# over rtl_tcp; this rack backend records a pass to CU8 and decodes it with the
+# local SatDump (build above). No SDR contention (dedicated dongle) -> no FM
+# stop/restart, no listener check (unlike the Pi's wxsat). Code is provisioner-
+# owned (overwritten from the repo); wxsat.env is keep-if-absent (hand-tunable).
+
+# pyorbital is pip-only on noble (no apt package). numpy/scipy/requests come from
+# apt (installed above). Guard so re-provisions don't reinstall.
+if ! python3 -c 'import pyorbital' >/dev/null 2>&1; then
+  command -v pip3 >/dev/null 2>&1 || apt-get install -y python3-pip >/dev/null 2>&1 || true
+  echo "    installing pyorbital (pip)"
+  pip3 install --break-system-packages pyorbital >/dev/null 2>&1 || \
+    echo "    WARN: pyorbital install failed — scheduler will not predict passes"
+fi
+
+install -d -m 0755 /opt/wxsat
+# SatDump 2.0-alpha (built above) resolves its plugin .so dir as ./plugins
+# relative to cwd — the build bakes no absolute path. Give it a working dir whose
+# ./plugins points at the real install so the capture script can `cd` here.
+install -d -o radio -g radio -m 0755 /opt/wxsat/sdwd
+ln -sfn /usr/lib/satdump/plugins /opt/wxsat/sdwd/plugins
+# celestrak.org is unreachable from here (same as the Pi); SatDump's TLE
+# auto-update otherwise blocks ~134s per run. Fast-fail it (we seed TLEs in the
+# capture script). Idempotent.
+if ! grep -q 'celestrak.org' /etc/hosts; then
+  echo '127.0.0.1 celestrak.org celestrak.com' >> /etc/hosts
+  echo "    /etc/hosts: celestrak fast-fail added (SatDump TLE auto-update)"
+fi
+cat > /opt/wxsat/wxsat_record_rtltcp.py <<'PYEOF'
+${wxsat_record_py}
+PYEOF
+cat > /opt/wxsat/wxsat_predict.py <<'PYEOF'
+${wxsat_predict_py}
+PYEOF
+cat > /opt/wxsat/wxsat_scheduler.py <<'PYEOF'
+${wxsat_scheduler_py}
+PYEOF
+cat > /opt/wxsat/wxsat_capture_rack.sh <<'EOF'
+${wxsat_capture_sh}
+EOF
+chmod +x /opt/wxsat/wxsat_record_rtltcp.py /opt/wxsat/wxsat_scheduler.py /opt/wxsat/wxsat_capture_rack.sh
+
+# Storage lives on the rack: products + the captures index + the TLE cache.
+install -d -o radio -g radio -m 0755 /var/lib/sdr-streams/wxsat /var/lib/sdr-streams/wxsat/tle
+
+# wxsat.env — keep-if-absent (operator tunes gain/DRY_RUN). DRY_RUN=1 is the safe
+# default: predicts + lists passes but never records, until the operator flips it.
+if [ -f /etc/radio-compute/wxsat.env ]; then
+  echo "    wxsat.env exists - keeping it"
+else
+  cat > /etc/radio-compute/wxsat.env <<EOF
+# Weather-sat (Meteor-M2 LRPT) capture on the rack, off p24's rtl_tcp Nooelec.
+# systemd EnvironmentFile: '#' only at line start; no inline comments after values.
+DRY_RUN=1
+WXSAT_RTLTCP_HOST=${wxsat_rtltcp_host}
+WXSAT_RTLTCP_PORT=${wxsat_rtltcp_port}
+WXSAT_FREQ_HZ=${wxsat_freq_hz}
+WXSAT_SAMPLERATE=${wxsat_samplerate}
+# Empty = hardware AGC; else tenths of dB (e.g. 400 = 40.0 dB).
+WXSAT_GAIN_TENTHS=
+FREQ_MHZ=137.9
+MIN_ELEV_DEG=20
+PREDICT_HOURS=48
+M2_4_ENABLED=1
+M2_3_ENABLED=0
+LAT=37.31
+LON=-89.55
+ALT_KM=0.1
+LRPT_PIPELINE=meteor_m2-x_lrpt
+WXSAT_BB_FORMAT=u8
+WXSAT_KEEP_IQ_ON_FAIL=1
+WXSAT_KEEP_IQ_ALWAYS=0
+WXSAT_MIN_FREE_GB=2
+AOS_BUFFER_S=45
+POST_LOS_S=15
+REFRESH_INTERVAL_S=1800
+EOF
+  chmod 0644 /etc/radio-compute/wxsat.env
+fi
+
+cat > /etc/systemd/system/wxsat-scheduler.service <<'EOF'
+[Unit]
+Description=Weather-sat (Meteor LRPT) scheduler — rack decode of p24 rtl_tcp
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=radio
+Group=radio
+Environment=HOME=/var/lib/sdr-streams/wxsat
+EnvironmentFile=/etc/radio-compute/wxsat.env
+ExecStart=/usr/bin/python3 /opt/wxsat/wxsat_scheduler.py
+Restart=always
+RestartSec=15s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+# Safe to run pre-cutover: with DRY_RUN=1 it only predicts + writes passes.json.
+systemctl enable wxsat-scheduler.service >/dev/null 2>&1 || true
+systemctl restart wxsat-scheduler.service || true
+
+# GALLERY CUTOVER (deliberate, NOT automated here): radio.rg2.io/wxsat still
+# proxies /api/wxsat/* to the Pi via WXSAT_UPSTREAM in tuner.env. Once the rack
+# has real captures, unset WXSAT_UPSTREAM (and restart sdr-tuner) so the gallery
+# serves THESE local captures. Doing it before any rack capture would blank the
+# page, so it's left as an operator step (see docs/deployment_notes.md).
+echo "    wxsat-scheduler: $(systemctl is-active wxsat-scheduler.service 2>/dev/null) (DRY_RUN gates real captures; gallery cutover = unset WXSAT_UPSTREAM)"
+%{ endif ~}
+
 echo "==> provisioning complete (toolchain staged; no units, nothing started)"
 echo "    csdr=$(command -v csdr || echo missing) nrsc5=$(command -v nrsc5 || echo missing) satdump=$(command -v satdump || echo missing)"
 %{ for id, dev in devices ~}

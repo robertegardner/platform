@@ -71,7 +71,11 @@ resource "proxmox_virtual_environment_container" "scanner_compute" {
   start_on_boot = true
 
   lifecycle {
-    ignore_changes = [tags]
+    # user_account.keys and template_file_id are create-only args the Proxmox
+    # API never returns on read, so re-importing this container (e.g. after a
+    # lost state file) would otherwise force a destroy/recreate. They don't
+    # change in practice — ignore them so `taint + apply` stays safe.
+    ignore_changes = [tags, initialization[0].user_account, operating_system[0].template_file_id]
   }
 }
 

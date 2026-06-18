@@ -13,6 +13,10 @@ locals {
   # compute modules render their client configs from their domain's devices.
   scanner_devices = { for id, d in local.present_devices : id => d if d.domain == "scanner" }
   radio_devices   = { for id, d in local.present_devices : id => d if d.domain == "radio" }
+  # Weather-sat domain (Meteor LRPT) lives on the outdoor ADS-B Pi (p24), served
+  # as rtl_tcp and decoded on the rack — its own domain so it stays out of the
+  # radio-compute device loops.
+  wxsat_devices = { for id, d in local.present_devices : id => d if d.domain == "wxsat" }
 }
 
 # Tier 1 — Acquisition (Pi, bare metal). NO container resource.
@@ -23,6 +27,18 @@ module "pi_acquisition" {
   ssh_user             = var.pi_ssh_user
   ssh_private_key_path = var.ssh_private_key_path
   devices              = local.present_devices
+}
+
+# Tier 1 (extra) — Weather-sat acquisition on the outdoor ADS-B Pi (p24). Bare
+# metal, no container; thin rtl_tcp source for the Nooelec/Meteor dipole. No
+# depends_on the rack: a down decoder is a runtime concern.
+module "pi_wxsat" {
+  source = "./modules/pi-wxsat"
+
+  wxsat_host           = var.wxsat_host
+  ssh_user             = var.wxsat_ssh_user
+  ssh_private_key_path = var.ssh_private_key_path
+  devices              = local.wxsat_devices
 }
 
 # NOTE: no proxmox_virtual_environment_pool here — the deploy API token lacks
@@ -95,6 +111,7 @@ module "radio_compute" {
   ssh_private_key_path = var.ssh_private_key_path
 
   devices                 = local.radio_devices
+  wxsat_devices           = local.wxsat_devices
   icecast_host            = var.distribution_ip
   icecast_source_password = var.icecast_source_password
   pi_host                 = var.pi_host
