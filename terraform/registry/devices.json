@@ -8,9 +8,9 @@
       "feed": "Shakespeare 5120",
       "filter": "FM bandpass",
       "_antenna_ports": {
-        "_comment": "RSPdx-R2 is a single tuner with 3 software-selectable antenna inputs (one band at a time). 'antenna'/'feed'/'filter' above describe the ACTIVE port (A, the FM job). Port B is now EMPTY (the dipole + Sawbird+ NOAA LNA were removed 2026-06-16 for troubleshooting on a separate Pi, taking the interim Meteor/NOAA path with them — no replacement until an RTL v4 is acquired). Port C carries the AM long-wire, consumed by radio-compute's am_stream.py over the remote dx-R2 (the eventual AM home is the HF+, deferred until its YouLoop + the radio-compute AM rewire).",
+        "_comment": "RSPdx-R2 is a single tuner with 3 software-selectable antenna inputs (one band at a time). 'antenna'/'feed'/'filter' above describe the ACTIVE port (A, the FM job). Port B now carries an AM loop -> 9:1 balun (added 2026-06-17, reusing the port the dipole + Sawbird+ NOAA LNA vacated 2026-06-16). Port C still carries the AM long-wire, consumed by radio-compute's am_stream.py over the remote dx-R2. NOTE: dx-R2 is single-tuner/one-band-at-a-time and Antenna A owns it for live FM, so B/C remain physical-readiness only until AM is sampled (on-demand preempt, or moved to the HF+ YouLoop).",
         "Antenna A": "Shakespeare 5120 + FM bandpass (active, fm-multistation)",
-        "Antenna B": "(empty — dipole + Sawbird+ NOAA LNA removed to the attic 2026-06-16)",
+        "Antenna B": "AM loop -> 9:1 balun (AM broadcast, added 2026-06-17)",
         "Antenna C": "long-wire — interim AM broadcast"
       },
       "role": "fm-multistation",
@@ -24,12 +24,12 @@
       "usb_controller": "A"
     },
     "hf-plus": {
-      "_comment": "Airspy HF+ — attached 2026-06-16, served on the Pi (sdr-source@hf-plus :55002, SoapyAirspyHF built by the pi provisioner). Interim antenna is a WHIP until the YouLoop arrives. NOTE: present:true makes the pi-acquisition provisioner lay down its source server, but the radio-compute AM consumer still reads the dx-R2 long-wire (Antenna C) — moving AM onto the HF+ is a deliberate radio-compute follow-up (touches the live FM stream), not yet done.",
+      "_comment": "Airspy HF+ — attached 2026-06-16, served on the Pi (sdr-source@hf-plus :55002, SoapyAirspyHF built by the pi provisioner). YouLoop attached 2026-06-17 (replaced the interim whip). NOTE: the YouLoop is a passive HF/MW magnetic loop — great for the HF+'s am-broadcast role, but it is NOT a VHF antenna, so it likely degrades the NOAA Weather Radio reception (162.550 MHz) that wx-stream.py serves on /wx.mp3 off the whip's ~60 dB. Re-verify /wx.mp3 + the NWR scan after the swap. present:true makes the pi-acquisition provisioner lay down its source server; the radio-compute AM consumer still reads the dx-R2 long-wire (Antenna C) — moving AM onto the HF+ YouLoop is a deliberate radio-compute follow-up (touches the live FM stream), not yet done.",
       "present": true,
       "soapy_args": "driver=airspyhf",
       "antenna": "single",
-      "feed": "whip (interim) / YouLoop (pending)",
-      "filter": "none (whip)",
+      "feed": "YouLoop",
+      "filter": "none (YouLoop)",
       "role": "am-broadcast",
       "domain": "radio",
       "transport": "soapy-remote",
@@ -90,7 +90,7 @@
       "usb_controller": "B"
     },
     "nooelec-wx": {
-      "_comment": "Nooelec NESDR SMArt v5 (RTL2838, Meteor V-dipole) on the OUTDOOR ADS-B Pi p24.srvr (192.168.6.141), NOT the radio acquisition Pi. Added 2026-06-17 alongside p24's two ADS-B dongles (1090 @ serial 00001090, UAT 978 @ serial 00000001). DEDICATED to weather-sat / NWR — never shared with ADS-B. p24 serves it to the rack as rtl_tcp (CU8); radio-compute's SatDump (librtltcp_support) decodes Meteor LRPT live over the LAN — all decode + storage on the rack. Serial is the FACTORY-UNIQUE 22012952 (NESDR SMARts ship unique — no collision with the ADS-B dongles, so no EEPROM reflash; selection is by this serial). dvb_usb_rtl28xxu is blacklisted so librtlsdr keeps it. The 'wxsat' domain keeps it out of radio-compute's existing radio_devices loops. NOTE 2026-06-18: p24's USB bus is power-marginal (repeated enumerate error -71) — needs a POWERED hub before it holds the dongle reliably.",
+      "_comment": "Nooelec NESDR SMArt v5 (RTL2838, Meteor V-dipole) on the OUTDOOR ADS-B Pi p24.srvr (192.168.6.141), NOT the radio acquisition Pi. Added 2026-06-17 alongside p24's two ADS-B dongles (1090 @ serial 00001090, UAT 978 @ serial 00000001). DEDICATED to weather-sat / NWR — never shared with ADS-B. p24 serves it to the rack as rtl_tcp (CU8); radio-compute's SatDump (librtltcp_support) decodes Meteor LRPT live over the LAN — all decode + storage on the rack. Serial is the FACTORY-UNIQUE 22012952 (NESDR SMArts ship unique — no collision with the ADS-B dongles, so no EEPROM reflash; selection is by this serial). dvb_usb_rtl28xxu is blacklisted so librtlsdr keeps it. The 'wxsat' domain keeps it out of radio-compute's existing radio_devices loops. NOTE 2026-06-18: p24's USB bus is power-marginal (repeated enumerate error -71) — needs a POWERED hub before it holds the dongle reliably.",
       "present": true,
       "host": "p24.srvr",
       "soapy_args": "driver=rtlsdr",
@@ -105,7 +105,7 @@
       "endpoint": "tcp://p24.srvr:1234",
       "port": 1234,
       "freq_hz": 137900000,
-      "sample_rate_default": 1024000,
+      "sample_rate_default": 250000,
       "bias_tee": false,
       "usb_controller": "p24"
     }

@@ -224,7 +224,7 @@ def main():
     args = ap.parse_args()
     cfg = predict.load_config()
     # Rack samplerate default differs from the Pi's 2.048M (RTL Nooelec @ 1.024M).
-    cfg["samplerate"] = os.environ.get("WXSAT_SAMPLERATE", "1024000")
+    cfg["samplerate"] = os.environ.get("WXSAT_SAMPLERATE", "250000")
 
     if args.capture_now is not None:
         p = _synthetic_pass(cfg)
