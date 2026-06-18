@@ -638,8 +638,12 @@ WXSAT_RTLTCP_HOST=${wxsat_rtltcp_host}
 WXSAT_RTLTCP_PORT=${wxsat_rtltcp_port}
 WXSAT_FREQ_HZ=${wxsat_freq_hz}
 WXSAT_SAMPLERATE=${wxsat_samplerate}
-# Empty = hardware AGC; else tenths of dB (e.g. 400 = 40.0 dB).
-WXSAT_GAIN_TENTHS=
+# Tenths of dB; empty = AGC. KEEP LOW: a powered Sawbird+ NOAA LNA (~40 dB,
+# filtered) is upstream, so the RTL must run near-minimum — it provides the gain.
+# 40 dB RTL gain STACKED on the LNA clipped ~19% of samples (overload, mean|IQ|
+# ~110) and killed the LRPT decode 2026-06-18. 7.2 dB gives clean IQ (0% clip,
+# mean|IQ|~40). Don't raise without re-checking clip% at 137.9.
+WXSAT_GAIN_TENTHS=72
 FREQ_MHZ=137.9
 MIN_ELEV_DEG=20
 PREDICT_HOURS=48

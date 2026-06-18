@@ -118,8 +118,11 @@ def do_capture(p, cfg):
     log.info("CAPTURE %s -> %s (%ss)", p["satellite"], out_dir, duration)
     write_status(cfg, "capturing", capturing=p)
     try:
+        # Generous decode budget: a ~16-min record + up to two full ~1.8 GB
+        # SatDump pipelines (72k then 80k fallback) can take ~15 min on the LXC;
+        # 600 s killed a valid pass mid-decode. 1800 s covers both pipelines.
         r = subprocess.run([CAPTURE_SCRIPT], env=env, capture_output=True,
-                           text=True, timeout=duration + 600)
+                           text=True, timeout=duration + 1800)
     except subprocess.TimeoutExpired:
         return record_outcome(p, "failed", reason="capture timed out", outdir=reldir)
     if r.returncode != 0:
