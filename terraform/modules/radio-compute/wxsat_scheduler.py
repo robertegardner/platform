@@ -40,6 +40,32 @@ CAPTURES_PATH = WXSAT_DIR / "captures.json"
 STATUS_PATH   = Path("/run/sdr-streams/wxsat_status.json")
 TIMESYNC_MARKER = Path("/run/systemd/timesync/synchronized")
 CAPTURE_SCRIPT  = "/opt/wxsat/wxsat_capture_rack.sh"
+# Operator-specified extra capture windows (e.g. external-tracker times being
+# A/B-tested against ours). DISPLAY-ONLY in the pass list — actual captures of
+# these are driven by separate systemd timers. Each entry: aos_unix, los_unix,
+# max_elev (or null), source (e.g. "n2yo"). Tagged so the UI shows their origin.
+EXTRA_PASSES_PATH = Path("/etc/radio-compute/wxsat_extra_passes.json")
+
+
+def merge_extra_passes(passes):
+    try:
+        extra = json.loads(EXTRA_PASSES_PATH.read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return passes
+    now = time.time()
+    for e in extra if isinstance(extra, list) else []:
+        try:
+            if e.get("los_unix", 0) < now:
+                continue
+            e.setdefault("satellite", "METEOR-M2 4")
+            e.setdefault("source", "external")
+            e.setdefault("aos_iso", datetime.fromtimestamp(e["aos_unix"], timezone.utc).isoformat())
+            e.setdefault("duration_min", round((e["los_unix"] - e["aos_unix"]) / 60.0, 1))
+            passes.append(e)
+        except (KeyError, TypeError):
+            pass
+    passes.sort(key=lambda p: p.get("aos_unix", 0))
+    return passes
 
 
 # --- captures index (schema matches the radio app's /api/wxsat/captures) ----
@@ -173,7 +199,7 @@ def run(cfg):
              cfg["dry_run"], [s["name"] for s in cfg["satellites"]], cfg["min_elev"],
              os.environ.get("WXSAT_RTLTCP_HOST"), os.environ.get("WXSAT_RTLTCP_PORT"))
     while True:
-        passes = predict.compute_passes(cfg)
+        passes = merge_extra_passes(predict.compute_passes(cfg))
         predict.write_passes(passes, cfg)
         now = time.time()
         due = [p for p in passes

@@ -190,6 +190,7 @@ def compute_passes(cfg):
                 "los_iso": fall.replace(tzinfo=timezone.utc).isoformat(),
                 "max_elev": round(max_elev, 1),
                 "duration_min": round((los_u - aos_u) / 60.0, 1),
+                "source": "ours",   # our SGP4 / Space-Track prediction
             })
     passes.sort(key=lambda p: p["aos_unix"])
     return passes
