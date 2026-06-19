@@ -4,7 +4,96 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
-## 2026-06-17 (latest) — NOAA Weather Radio + on-demand ATC airband
+## 2026-06-18 (latest) — Unified stack GUI (/dash): coordinator, A/B, ATC presets + recording
+
+**State: `radio.rg2.io/dash` is now the whole-stack control surface. Built across
+radio (`unified-gui`), scanner (`r2-mode-coordinator`), platform
+(`scanner-r2-coordinator`, `radio-ab-compare`). Live-deployed on .84 (hand-pushed;
+`app.py.preunified.bak` = rollback). Design doc: radio `docs/UNIFIED_GUI_DESIGN.md`.**
+
+- **Gateway + source tabs (Phase 1):** tabs FM/AM/NOAA/P25/ATC over
+  `/api/stack-state`; `/api/scanner/<path>` proxies scanner-api (.83) → one origin.
+  FM/AM tune via `/api/tune`; NOAA/P25/ATC drive the coordinator.
+- **R2-mode coordinator (Phase 4):** the single-tuner discone/R2 switches
+  NOAA(default)↔P25↔ATC via `r2-mode.sh` on .83 (stop-all → REQUIRED Pi source
+  bounce via a forced-command key → start mode). Boot model flipped: NOAA is the
+  24/7 default; P25/ATC are deliberate preempts. `monitor.service` simplified.
+  scanner-api `/api/r2/{state,mode}`. NOTE: no auto-return for *manual* ATC tunes —
+  they leave `monitor.service` running until stopped.
+- **Debug window:** 🛠 panel — live feed of commands rack↔attic + stack transitions
+  (`/api/debug-log`, after_request capture).
+- **Live A/B antenna compare:** AM tab — same station on HF+ (`/am-a.mp3`) +
+  dx-R2/B (`/am-b.mp3`) at once, instant in-GUI toggle (two muted audio elements);
+  the dx-R2 side preempts FM. `am-compare-a/b.service` on .84.
+- **Phase 2 beautify:** full visual pass — glassy cards, per-source accent colors,
+  segmented tabs + antenna control, sticky player, responsive.
+- **Editable ATC presets:** server-persisted (`/var/lib/sdr-streams/atc_presets.json`),
+  add/rename/delete in `/dash`. Seed corrected from the V1 scanner `AVIATION_PRESETS`
+  (KCGI Tower **125.525** — was wrongly 119.0; Memphis Center 131.36/132.5363).
+- **ATC recording + scheduling:** schedule a window (or rec-now) → the `atc-rec`
+  tick (1-min systemd timer on .84) tunes ATC for the window, records
+  `/scanner-atc.mp3` to one MP3/job (**waits for the mount** post-bounce so ffmpeg
+  doesn't die on the 404), returns to NOAA, prunes past N days (default 14).
+  `/api/atc-rec/*`; ATC tab Recordings panel (play/download/delete + retention).
+  **One recording at a time; a scheduled ATC window preempts P25/NOAA** (single-tuner).
+- **R2 idle-display fix:** `/api/stack-state` derives `r2_role` from the coordinator
+  (.83 `/api/r2/state`), not the icecast mounts — `/ems.mp3` + `/scanner-atc.mp3`
+  stay mksafe-published so they falsely read "live". ATC/P25 now read idle unless
+  they hold the R2.
+- **Tooling:** chromium + fonts-noto-color-emoji + puppeteer-core installed on
+  codeserver for headless `/dash` screenshots.
+
+**Next:** Phase 3 — multichannel-FM channel grid (when that branch lands). Optional:
+repeat schedules / ADS-B-triggered ATC recording.
+
+## 2026-06-18 — AM antenna selection (A/B/C/HF+) + HF+ YouLoop AM source
+
+**State: the rack radio tuner gained per-station AM antenna selection across the
+dx-R2 ports (A/B/C) AND the Airspy HF+ on the new YouLoop. Built + deployed live
+on .84 + validated; FM untouched. radio-repo branch `am-antenna-selection`
+(pushed, PR open). Platform side: `provision-radio.sh.tpl` only.**
+
+- **Hardware (user, 2026-06-17/18):** YouLoop on the HF+ (replaced the interim
+  whip → WX offline for now); AM loop + 9:1 balun on **dx-R2 Antenna B**. A
+  daylight `am_scan` survey across all three AM feeds confirmed per-station
+  winners differ (e.g. 960 KSIM + 1220 peak on the dx-R2 loop+balun; 1230 KZYM +
+  1550 peak on the YouLoop) — the empirical case for selectable antenna per
+  station. JSONs persisted on .84 `/var/lib/sdr-streams/surveys/` + codeserver
+  `~/am-surveys/`.
+- **HF+ AM is a new DSP path (de-risked first).** `am_stream.py` is now
+  **per-source profiled**: `dx-r2` (sdrplay @2 MHz → 50k out, ports A/B/C, +500k
+  offset + MW settings) vs `hf-plus` (airspyhf @768k → 48k out, RX, +30k offset,
+  no sdrplay settings), keyed off `SOURCE` in active.env. Proven by ear on the
+  YouLoop (960/1230/1550) before any UI was built. The HF+'s TCXO locks the PLL
+  at +0.00 Hz (vs the dx-R2's ~+800 Hz drift).
+- **Backend glue:** `app.py` `write_env` maps the antenna pick → `SOURCE` +
+  hardware antenna (HF+ → hf-plus/RX, **AM-only**; FM/HD always dx-R2);
+  `ALLOWED_ANTENNAS` gains "HF+"; `/api/tune` + `/tune` accept the antenna. The
+  rack `stream.sh` AM branch now sets ffmpeg `-ar` from `SOURCE` (50k dx-r2 / 48k
+  hf-plus) — patched in the **platform provisioner** (`provision-radio.sh.tpl`)
+  AND the live file. `source-hf-plus.env` auto-renders from the registry on the
+  next apply (created by hand on .84 for now).
+- **GUI (radio.html):** the ANT cycle-toggle → **discrete A / B / C / HF+
+  buttons** (HF+ lit on AM, greyed on FM); AM presets carry the antenna.
+- **Admin (index.html):** the AM table shows **per-antenna SNR columns
+  (A/B/C/HF+)** with the best highlighted, + a guarded **"Rescan Antennas"**
+  button (confirm: "interrupts FM ~1–2 min"). The rescan = `sdr-am-scan.service`
+  → NEW `am_scan_all.sh` (sweeps dx-R2 A/B/C, then the HF+ via the device-
+  targetable `am_scan.py`, merges by_antenna via NEW `am_scan_merge.py` with
+  RX→HF+ remap, picks best/station). FM stop/restore is the unit's
+  ExecStartPre/StopPost (unchanged).
+- **Validated live:** /api/tune to HF+ 1230 + dx-R2 B 960 wrote the right
+  active.env (SOURCE/ANTENNA/GAIN), am_stream picked the right device+rate, PLL
+  locked, /fm.mp3 200, FM restored. Full rescan merged 21 stations across
+  A/B/C/HF+ (960→B 43.2, 1550→HF+ 42.6, 1220→B 32.8, 1120→A 22.2, 1230→HF+ 18.9).
+- **Deploy:** hand-pushed to .84 (live); `deploy.sh --rack` updated to ship the 2
+  new scripts. **Known gap:** the scan's wx-stream stop is best-effort (no
+  sudoers grant; WX offline now). Single mount — auditioning AM still replaces FM
+  on /fm.mp3 (a dedicated always-on /am.mp3 for the contention-free HF+ is a
+  noted future option). Next: night sweep to re-rank the weak end; whip back for
+  WX when done.
+
+## 2026-06-17 — NOAA Weather Radio + on-demand ATC airband
 
 **State: NOAA WX radio LIVE on /wx.mp3 (HF+); on-demand ATC airband LIVE
 (/scanner-atc.mp3, preempts P25) with a scanner-api endpoint + ems.rg2.io UI

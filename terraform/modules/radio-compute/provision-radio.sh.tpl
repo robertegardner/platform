@@ -194,19 +194,19 @@ else
   cat > /etc/sdr-streams/tuner.env <<'EOF'
 # Used by the sdr-tuner UI to rewrite active.env when you tune a station.
 ICECAST_PASS=${icecast_source_password}
-# wxsat captures live only on the Pi (the scheduler needs the SDR). The rack
-# tuner proxies every /api/wxsat/* call here so radio.rg2.io shows the gallery.
-WXSAT_UPSTREAM=http://${pi_host}:8080
+# wxsat now runs ON the rack (the Meteor scheduler/captures below), so the tuner
+# serves /api/wxsat/* from its own /var/lib/sdr-streams/wxsat — no Pi proxy.
 EOF
   chown radio:radio /etc/sdr-streams/tuner.env
   chmod 0600 /etc/sdr-streams/tuner.env
 fi
 
-# tuner.env is keep-if-exists, so existing installs predate WXSAT_UPSTREAM —
-# ensure the line is present (idempotent) so the wxsat gallery proxies to the Pi.
-if ! grep -q '^WXSAT_UPSTREAM=' /etc/sdr-streams/tuner.env; then
-  echo "WXSAT_UPSTREAM=http://${pi_host}:8080" >> /etc/sdr-streams/tuner.env
-  echo "    tuner.env: added WXSAT_UPSTREAM (wxsat proxy to Pi)"
+# wxsat moved to the rack (2026-06-18 cutover). The tuner must NOT proxy
+# /api/wxsat/* to the Pi anymore — comment out any active WXSAT_UPSTREAM left
+# from the pre-rack-wxsat setup so radio.rg2.io/wxsat shows THESE captures.
+if grep -q '^WXSAT_UPSTREAM=' /etc/sdr-streams/tuner.env; then
+  sed -i 's|^WXSAT_UPSTREAM=|#WXSAT_UPSTREAM= (rack serves wxsat locally) |' /etc/sdr-streams/tuner.env
+  echo "    tuner.env: disabled WXSAT_UPSTREAM (rack is the wxsat backend)"
 fi
 
 if [ -f /opt/sdr-tuner/stream.sh ]; then
@@ -261,13 +261,16 @@ if [[ "$MODE" == "wbfm" || "$MODE" == "fm" ]]; then
              -f mp3 '$ICECAST_URL'"
   fi
 elif [[ "$MODE" == "am" || "$MODE" == "nfm" ]]; then
-  # AM via am_stream.py: reads IQ from the remote dx-R2 (driver=remote, forced
-  # onto TCP), narrow 2-stage channel filter + FFT-locked synchronous demod,
-  # emits s16le mono @ 50k. Reads FREQ/GAIN/ANTENNA from active.env (ANTENNA
-  # defaults to the long-wire on Antenna C). No RDS on AM. ffmpeg trims the
-  # subsonics, telephone-bands the audio, and encodes mp3 to Icecast.
+  # AM via am_stream.py: reads IQ via SoapySDR (driver=remote, forced onto TCP),
+  # narrow 2-stage channel filter + FFT-locked synchronous demod. am_stream picks
+  # the device + HW rate from SOURCE in active.env: dx-r2 (2 MHz -> 50k out, ports
+  # A/B/C) or hf-plus (the YouLoop on :55002, 768k -> 48k out). Match ffmpeg's
+  # input rate to the source. Reads FREQ/GAIN/ANTENNA/SOURCE from active.env. No
+  # RDS on AM. ffmpeg trims subsonics, telephone-bands the audio, encodes to mp3.
+  AR=50000
+  [ "$${SOURCE:-dx-r2}" = "hf-plus" ] && AR=48000
   exec bash -c "python3 /opt/sdr-tuner/am_stream.py | \
-    ffmpeg -hide_banner -loglevel warning -f s16le -ar 50000 -ac 1 -i - \
+    ffmpeg -hide_banner -loglevel warning -f s16le -ar $AR -ac 1 -i - \
            -af 'highpass=f=50,lowpass=f=4800' \
            -ar 48000 -ac 1 \
            -c:a libmp3lame -b:a $BITRATE -content_type audio/mpeg \
@@ -283,9 +286,104 @@ fi
 
 echo "==> sudoers: the tuner UI may control sdr-fm@active"
 cat > /etc/sudoers.d/radio-tuner <<'EOF'
-radio ALL=(root) NOPASSWD: /usr/bin/systemctl start sdr-fm@active, /usr/bin/systemctl stop sdr-fm@active, /usr/bin/systemctl restart sdr-fm@active, /usr/bin/systemctl start sdr-scan.service, /usr/bin/systemctl stop sdr-scan.service, /usr/bin/systemctl start sdr-am-scan.service, /usr/bin/systemctl stop sdr-am-scan.service
+radio ALL=(root) NOPASSWD: /usr/bin/systemctl start sdr-fm@active, /usr/bin/systemctl stop sdr-fm@active, /usr/bin/systemctl restart sdr-fm@active, /usr/bin/systemctl start sdr-scan.service, /usr/bin/systemctl stop sdr-scan.service, /usr/bin/systemctl start sdr-am-scan.service, /usr/bin/systemctl stop sdr-am-scan.service, /usr/bin/systemctl start am-compare-a.service, /usr/bin/systemctl stop am-compare-a.service, /usr/bin/systemctl start am-compare-b.service, /usr/bin/systemctl stop am-compare-b.service, /usr/bin/systemctl start fm-watch.timer, /usr/bin/systemctl stop fm-watch.timer
 EOF
 chmod 0440 /etc/sudoers.d/radio-tuner
+
+echo "==> live A/B comparison units (HF+ vs dx-R2/B -> /am-{a,b}.mp3; app.py /api/abcompare/*)"
+if [ -f /opt/sdr-tuner/am-compare.sh ]; then
+  echo "    am-compare.sh exists - keeping it"
+else
+  cat > /opt/sdr-tuner/am-compare.sh <<'EOF'
+#!/bin/bash
+# Live A/B side: AM-demod one station on one device -> /am-$1.mp3 (a=HF+ YouLoop
+# 48k, b=dx-R2 Antenna B 50k). app.py /api/abcompare/* writes the per-side env
+# (SOURCE/FREQ/GAIN/ANTENNA) read via AM_ACTIVE_ENV; ICECAST_PASS from active.env.
+set -euo pipefail
+SIDE="$1"
+ENVF="/etc/sdr-streams/am-compare-$SIDE.env"
+source <(grep '^ICECAST_PASS=' /etc/sdr-streams/active.env)
+SRC=$(grep '^SOURCE=' "$ENVF" | cut -d= -f2 | tr -d '"')
+AR=50000; [ "$SRC" = "hf-plus" ] && AR=48000
+export AM_ACTIVE_ENV="$ENVF"
+exec bash -c "python3 /opt/sdr-tuner/am_stream.py 2>/tmp/am-compare-$SIDE.log | \
+  ffmpeg -hide_banner -loglevel error -f s16le -ar $AR -ac 1 -i - \
+    -af 'highpass=f=300:p=2,lowpass=f=3800,dynaudnorm=framelen=500:gausssize=11:maxgain=6' \
+    -ar 48000 -ac 1 -c:a libmp3lame -b:a 64k -content_type audio/mpeg \
+    -f mp3 'icecast://source:$${ICECAST_PASS}@${icecast_host}:${icecast_port}/am-$SIDE.mp3'"
+EOF
+  chmod +x /opt/sdr-tuner/am-compare.sh
+fi
+cat > /etc/systemd/system/am-compare-a.service <<'EOF'
+[Unit]
+Description=AM A/B compare side a (HF+ YouLoop) -> /am-a.mp3
+After=network-online.target
+[Service]
+Type=simple
+User=radio
+Group=radio
+ExecStart=/opt/sdr-tuner/am-compare.sh a
+Restart=on-failure
+RestartSec=6
+EOF
+cat > /etc/systemd/system/am-compare-b.service <<'EOF'
+[Unit]
+Description=AM A/B compare side b (dx-R2 Antenna B, preempts FM) -> /am-b.mp3
+Conflicts=sdr-fm@active.service
+After=network-online.target
+[Service]
+Type=simple
+User=radio
+Group=radio
+ExecStart=/opt/sdr-tuner/am-compare.sh b
+Restart=on-failure
+RestartSec=6
+EOF
+
+echo "==> ATC recording: recorder unit + scheduler tick (1-min timer) + retention"
+# The app's /api/atc-rec/* write the schedule to here; the tick reconciles it
+# against the clock (tune ATC -> record /scanner-atc.mp3 -> back to NOAA -> prune).
+# atc-rec-tick.py + atc-record.sh ship with the app payload (deploy.sh).
+install -d -o radio -g radio /var/lib/sdr-streams/atc-rec
+cat > /etc/systemd/system/atc-record.service <<'EOF'
+[Unit]
+Description=ATC scheduled recording (icecast mount -> file)
+[Service]
+Type=simple
+User=radio
+Group=radio
+EnvironmentFile=/var/lib/sdr-streams/atc-rec/record.env
+ExecStart=/opt/sdr-tuner/atc-record.sh
+Restart=no
+EOF
+cat > /etc/systemd/system/atc-rec.service <<'EOF'
+[Unit]
+Description=ATC recording scheduler tick
+After=network-online.target
+[Service]
+Type=oneshot
+User=radio
+Group=radio
+ExecStart=/usr/bin/python3 /opt/sdr-tuner/atc-rec-tick.py
+EOF
+cat > /etc/systemd/system/atc-rec.timer <<'EOF'
+[Unit]
+Description=Run the ATC recording scheduler every minute
+[Timer]
+OnBootSec=45
+OnUnitActiveSec=60
+AccuracySec=10s
+[Install]
+WantedBy=timers.target
+EOF
+# the tick (User=radio) drives the recorder via sudo
+cat > /etc/sudoers.d/atc-rec <<'EOF'
+radio ALL=(root) NOPASSWD: /usr/bin/systemctl start atc-record.service, /usr/bin/systemctl stop atc-record.service, /usr/bin/systemctl restart atc-record.service
+EOF
+chmod 0440 /etc/sudoers.d/atc-rec
+systemctl daemon-reload
+systemctl enable atc-rec.timer >/dev/null 2>&1 || true
+systemctl start atc-rec.timer || true
 
 echo "==> systemd units (laid down + reloaded; enable/start is a manual switch step)"
 cat > /etc/systemd/system/sdr-fm@.service <<'EOF'
@@ -434,17 +532,17 @@ EOF
 
 cat > /etc/systemd/system/sdr-am-scan.service <<'EOF'
 [Unit]
-Description=AM band scan (writes stations_am.json; interrupts FM for the sweep)
+Description=AM antenna survey (dx-R2 A/B/C + HF+ YouLoop -> stations_am.json; interrupts FM)
 After=network-online.target
 
 [Service]
 Type=oneshot
 User=radio
 Group=radio
-TimeoutStartSec=600
+TimeoutStartSec=900
 ExecStartPre=+/usr/bin/systemctl stop fm-watch.timer
 ExecStartPre=+/usr/bin/systemctl stop sdr-fm@active
-ExecStart=/usr/bin/python3 /opt/sdr-tuner/am_scan.py --antennas "Antenna A,Antenna B,Antenna C"
+ExecStart=/bin/bash /opt/sdr-tuner/am_scan_all.sh
 ExecStopPost=+/usr/bin/systemctl start sdr-fm@active
 ExecStopPost=+/usr/bin/systemctl start fm-watch.timer
 EOF
@@ -574,6 +672,122 @@ EOF
 systemctl daemon-reload
 systemctl enable wx-alert.service >/dev/null 2>&1 || true
 systemctl restart wx-alert.service || true
+
+%{ if wxsat_enabled ~}
+echo "==> Weather-sat (Meteor LRPT) rack decoder — records p24's rtl_tcp -> SatDump"
+# The Nooelec (Meteor V-dipole) lives on the outdoor ADS-B Pi (p24) and is served
+# over rtl_tcp; this rack backend records a pass to CU8 and decodes it with the
+# local SatDump (build above). No SDR contention (dedicated dongle) -> no FM
+# stop/restart, no listener check (unlike the Pi's wxsat). Code is provisioner-
+# owned (overwritten from the repo); wxsat.env is keep-if-absent (hand-tunable).
+
+# pyorbital is pip-only on noble (no apt package). numpy/scipy/requests come from
+# apt (installed above). Guard so re-provisions don't reinstall.
+if ! python3 -c 'import pyorbital' >/dev/null 2>&1; then
+  command -v pip3 >/dev/null 2>&1 || apt-get install -y python3-pip >/dev/null 2>&1 || true
+  echo "    installing pyorbital (pip)"
+  pip3 install --break-system-packages pyorbital >/dev/null 2>&1 || \
+    echo "    WARN: pyorbital install failed — scheduler will not predict passes"
+fi
+
+install -d -m 0755 /opt/wxsat
+# SatDump 2.0-alpha (built above) resolves its plugin .so dir as ./plugins
+# relative to cwd — the build bakes no absolute path. Give it a working dir whose
+# ./plugins points at the real install so the capture script can `cd` here.
+install -d -o radio -g radio -m 0755 /opt/wxsat/sdwd
+ln -sfn /usr/lib/satdump/plugins /opt/wxsat/sdwd/plugins
+# celestrak.org is unreachable from here (same as the Pi); SatDump's TLE
+# auto-update otherwise blocks ~134s per run. Fast-fail it (we seed TLEs in the
+# capture script). Idempotent.
+if ! grep -q 'celestrak.org' /etc/hosts; then
+  echo '127.0.0.1 celestrak.org celestrak.com' >> /etc/hosts
+  echo "    /etc/hosts: celestrak fast-fail added (SatDump TLE auto-update)"
+fi
+cat > /opt/wxsat/wxsat_record_rtltcp.py <<'PYEOF'
+${wxsat_record_py}
+PYEOF
+cat > /opt/wxsat/wxsat_predict.py <<'PYEOF'
+${wxsat_predict_py}
+PYEOF
+cat > /opt/wxsat/wxsat_scheduler.py <<'PYEOF'
+${wxsat_scheduler_py}
+PYEOF
+cat > /opt/wxsat/wxsat_capture_rack.sh <<'EOF'
+${wxsat_capture_sh}
+EOF
+chmod +x /opt/wxsat/wxsat_record_rtltcp.py /opt/wxsat/wxsat_scheduler.py /opt/wxsat/wxsat_capture_rack.sh
+
+# Storage lives on the rack: products + the captures index + the TLE cache.
+install -d -o radio -g radio -m 0755 /var/lib/sdr-streams/wxsat /var/lib/sdr-streams/wxsat/tle
+
+# wxsat.env — keep-if-absent (operator tunes gain/DRY_RUN). DRY_RUN=1 is the safe
+# default: predicts + lists passes but never records, until the operator flips it.
+if [ -f /etc/radio-compute/wxsat.env ]; then
+  echo "    wxsat.env exists - keeping it"
+else
+  cat > /etc/radio-compute/wxsat.env <<EOF
+# Weather-sat (Meteor-M2 LRPT) capture on the rack, off p24's rtl_tcp Nooelec.
+# systemd EnvironmentFile: '#' only at line start; no inline comments after values.
+DRY_RUN=1
+WXSAT_RTLTCP_HOST=${wxsat_rtltcp_host}
+WXSAT_RTLTCP_PORT=${wxsat_rtltcp_port}
+WXSAT_FREQ_HZ=${wxsat_freq_hz}
+WXSAT_SAMPLERATE=${wxsat_samplerate}
+# Tenths of dB; empty = AGC. KEEP LOW: a powered Sawbird+ NOAA LNA (~40 dB,
+# filtered) is upstream, so the RTL must run near-minimum — it provides the gain.
+# 40 dB RTL gain STACKED on the LNA clipped ~19% of samples (overload, mean|IQ|
+# ~110) and killed the LRPT decode 2026-06-18. 7.2 dB gives clean IQ (0% clip,
+# mean|IQ|~40). Don't raise without re-checking clip% at 137.9.
+WXSAT_GAIN_TENTHS=72
+FREQ_MHZ=137.9
+MIN_ELEV_DEG=20
+PREDICT_HOURS=48
+M2_4_ENABLED=1
+M2_3_ENABLED=0
+LAT=37.31
+LON=-89.55
+ALT_KM=0.1
+LRPT_PIPELINE=meteor_m2-x_lrpt
+WXSAT_BB_FORMAT=u8
+WXSAT_KEEP_IQ_ON_FAIL=1
+WXSAT_KEEP_IQ_ALWAYS=0
+WXSAT_MIN_FREE_GB=2
+AOS_BUFFER_S=45
+POST_LOS_S=15
+REFRESH_INTERVAL_S=1800
+EOF
+  chmod 0644 /etc/radio-compute/wxsat.env
+fi
+
+cat > /etc/systemd/system/wxsat-scheduler.service <<'EOF'
+[Unit]
+Description=Weather-sat (Meteor LRPT) scheduler — rack decode of p24 rtl_tcp
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=radio
+Group=radio
+Environment=HOME=/var/lib/sdr-streams/wxsat
+EnvironmentFile=/etc/radio-compute/wxsat.env
+ExecStart=/usr/bin/python3 /opt/wxsat/wxsat_scheduler.py
+Restart=always
+RestartSec=15s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+# Safe to run pre-cutover: with DRY_RUN=1 it only predicts + writes passes.json.
+systemctl enable wxsat-scheduler.service >/dev/null 2>&1 || true
+systemctl restart wxsat-scheduler.service || true
+
+# GALLERY: the tuner.env block above already disabled WXSAT_UPSTREAM, so
+# radio.rg2.io/wxsat serves THESE rack captures (upcoming passes show at once;
+# images fill in as passes decode). Re-point at the Pi only for a rollback.
+echo "    wxsat-scheduler: $(systemctl is-active wxsat-scheduler.service 2>/dev/null) (DRY_RUN gates real captures; gallery serves rack-local /var/lib/sdr-streams/wxsat)"
+%{ endif ~}
 
 echo "==> provisioning complete (toolchain staged; no units, nothing started)"
 echo "    csdr=$(command -v csdr || echo missing) nrsc5=$(command -v nrsc5 || echo missing) satdump=$(command -v satdump || echo missing)"
