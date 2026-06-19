@@ -18,6 +18,9 @@ locals {
 }
 
 resource "null_resource" "provision" {
+  # No-op when no wxsat device is present (e.g. shelved): don't touch p24.
+  count = length(var.devices) > 0 ? 1 : 0
+
   triggers = {
     provision_hash = sha256(local.provision_script)
     devices        = jsonencode(var.devices)

@@ -90,8 +90,8 @@
       "usb_controller": "B"
     },
     "nooelec-wx": {
-      "_comment": "Nooelec NESDR SMArt v5 (RTL2838, Meteor V-dipole) on the OUTDOOR ADS-B Pi p24.srvr (192.168.6.141), NOT the radio acquisition Pi. Added 2026-06-17 alongside p24's two ADS-B dongles (1090 @ serial 00001090, UAT 978 @ serial 00000001). DEDICATED to weather-sat / NWR — never shared with ADS-B. p24 serves it to the rack as rtl_tcp (CU8); radio-compute's SatDump (librtltcp_support) decodes Meteor LRPT live over the LAN — all decode + storage on the rack. Serial is the FACTORY-UNIQUE 22012952 (NESDR SMArts ship unique — no collision with the ADS-B dongles, so no EEPROM reflash; selection is by this serial). dvb_usb_rtl28xxu is blacklisted so librtlsdr keeps it. The 'wxsat' domain keeps it out of radio-compute's existing radio_devices loops. NOTE 2026-06-18: p24's USB bus is power-marginal (repeated enumerate error -71) — needs a POWERED hub before it holds the dongle reliably.",
-      "present": true,
+      "_comment": "SHELVED 2026-06-19 (present:false). Nooelec NESDR SMArt v5 (RTL2838, Meteor V-dipole) on the OUTDOOR ADS-B Pi p24.srvr (192.168.6.141). The Meteor-LRPT-on-p24 project is paused: p24's USB bus is too power-marginal to hold the Nooelec reliably without a powered hub — it wedged overnight 2026-06-18/19 (rtl_tcp ConnectionReset -> all captures got no IQ). The afternoon passes that DID record (clean, gain 7.2dB/250k) decoded NOSYNC = reception unresolved. To UN-SHELVE: add a powered USB hub for the 3 dongles, flip present:true, terraform apply pi_wxsat + radio_compute, re-enable wxsat-rtltcp (p24) + wxsat-scheduler (.84). User unplugged the Nooelec + re-plugged both ADS-B dongles 2026-06-19; p24 is back to its ADS-B feeder role. Serial 22012952 (factory-unique). See memory wxsat-meteor-on-p24.",
+      "present": false,
       "host": "p24.srvr",
       "soapy_args": "driver=rtlsdr",
       "serial": "22012952",
