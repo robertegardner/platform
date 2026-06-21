@@ -643,10 +643,14 @@ else
 # wx.rg2.io page + SAME alert decoder. Set HA_WEBHOOK_URL to a Home Assistant
 # webhook (e.g. https://ha.rg2.io/api/webhook/<id>) to announce alerts on house
 # speakers / push. Empty = banner + log only.
+# WX_FIPS_FILTER: comma-separated SAME area allowlist (matched on the trailing 5
+# digits). The KPAH transmitter carries the whole tri-state region; this keeps us
+# to Cape Girardeau County, MO (029031). Empty = alert on every county it sends.
 WX_PORT=8090
 WX_DECODE_URL=http://192.168.6.82:8000/wx.mp3
 WX_PUBLIC_URL=https://icecast.rg2.io/wx.mp3
 HA_WEBHOOK_URL=
+WX_FIPS_FILTER=029031
 EOF
   chmod 0640 /etc/radio-compute/wx-alert.env
   chown root:radio /etc/radio-compute/wx-alert.env 2>/dev/null || true
