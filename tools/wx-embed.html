@@ -1,59 +1,110 @@
 <!--
-  NOAA Weather Radio embed — player + live SAME/EAS alert banner.
+  NOAA Weather Radio embed — minimal player + a top-of-page SAME/EAS alert bar.
 
-  Drop the markup below into any page on weather.bobgardner.org (or anywhere).
+  Drop this into any page (it powers the widget on weather.bobgardner.org).
   - Audio: https://icecast.rg2.io/wx.mp3  (media elements load cross-origin
     without CORS, so the player works from any origin).
   - Alerts: GET https://wx.rg2.io/api/alert -> {active, recent, decoder, ...}.
     Cross-origin fetch requires the wx-alert service to send
-    Access-Control-Allow-Origin (added in modules/radio-compute/wx_alert.py);
-    re-provision radio-compute for it to take effect.
+    Access-Control-Allow-Origin (see modules/radio-compute/wx_alert.py).
 
-  Self-contained: namespaced rg2wx- classes + an IIFE, so it won't collide
-  with the host page's CSS/JS.
+  Self-contained: namespaced rg2wx- classes + an IIFE, so it won't collide with
+  the host page's CSS/JS. The player renders inline where you drop this; the
+  alert bar is appended to <body> as a fixed strip and only appears during an
+  active alert. Light by default with a body.dark override for themed hosts.
+
+  weewx/Cheetah gotcha: include this with `#include raw "..."` (NOT a plain
+  #include) — otherwise Cheetah parses the JS `$()` as a template variable and
+  the whole report fails ("cannot find 'i'"). weewx also caches the compiled
+  template keyed off the parent .tmpl's mtime, so after editing this file you
+  must `touch` the parent .tmpl and run `weectl report run` for it to take.
 -->
-<div id="rg2wx" class="rg2wx">
-  <div class="rg2wx-banner" id="rg2wx-banner">
-    <div class="rg2wx-ok">No active alerts</div>
-    <div class="rg2wx-meta">monitoring SAME — turns red on a warning</div>
-  </div>
+<div class="rg2wx">
   <div class="rg2wx-player">
-    <span class="rg2wx-dot" id="rg2wx-dot"></span>
-    <b>NOAA WX 162.550</b>
-    <audio controls preload="none" src="https://icecast.rg2.io/wx.mp3"></audio>
+    <button class="rg2wx-play" id="rg2wx-play" type="button" aria-label="Play NOAA Weather Radio">
+      <svg class="ic-play" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+      <svg class="ic-pause" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z" fill="currentColor"/></svg>
+    </button>
+    <span class="rg2wx-pl-label">
+      <span class="rg2wx-title">NOAA Weather Radio</span>
+      <span class="rg2wx-status" id="rg2wx-status"><span class="rg2wx-dot" id="rg2wx-dot"></span><span id="rg2wx-stxt">Monitoring SAME alerts</span></span>
+    </span>
+    <audio id="rg2wx-audio" preload="none" src="https://icecast.rg2.io/wx.mp3"></audio>
   </div>
 </div>
 <style>
-.rg2wx{max-width:520px;font:15px/1.5 system-ui,-apple-system,sans-serif;color:#e6edf5}
-.rg2wx .rg2wx-banner{border-radius:12px;padding:.9rem 1.1rem;margin-bottom:.7rem;border:1px solid #243245;background:#141b27}
-.rg2wx .rg2wx-banner.alert{background:linear-gradient(180deg,#3a1416,#241016);border-color:#6e2630}
-.rg2wx .rg2wx-banner.alert.warn{animation:rg2wxPulse 1.4s infinite}
-@keyframes rg2wxPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,90,90,0)}50%{box-shadow:0 0 24px 0 rgba(255,90,90,.35)}}
-.rg2wx .rg2wx-ev{font-size:1.4rem;font-weight:700;color:#ff5a5a}
-.rg2wx .rg2wx-ok{font-size:1.05rem;font-weight:600;color:#5ce08a}
-.rg2wx .rg2wx-meta{color:#b9c6d6;font-size:.85rem;margin-top:.3rem}
-.rg2wx .rg2wx-player{background:#141b27;border:1px solid #243245;border-radius:12px;padding:.8rem 1.1rem;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.rg2wx .rg2wx-player audio{height:36px}
-.rg2wx .rg2wx-dot{width:9px;height:9px;border-radius:50%;background:#445;display:inline-block}
-.rg2wx .rg2wx-dot.on{background:#5ce08a;box-shadow:0 0 8px #5ce08a}
+.rg2wx{font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;margin:.5rem 0}
+.rg2wx-player{display:flex;align-items:center;gap:.75rem}
+.rg2wx-play{flex:0 0 auto;width:44px;height:44px;padding:0;border:0;border-radius:50%;
+  background:#0b5cab;color:#fff;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:background .15s ease,transform .1s ease}
+.rg2wx-play:hover{background:#0a4f93}
+.rg2wx-play:active{transform:scale(.93)}
+.rg2wx-play .ic-pause{display:none}
+.rg2wx-play.playing .ic-play{display:none}
+.rg2wx-play.playing .ic-pause{display:block}
+.rg2wx-pl-label{display:flex;flex-direction:column;line-height:1.25;min-width:0}
+.rg2wx-title{font-weight:600;color:inherit}
+.rg2wx-status{font-size:.8rem;color:#6b7280;display:flex;align-items:center;gap:.4rem;margin-top:1px}
+.rg2wx-dot{width:8px;height:8px;border-radius:50%;background:#9aa3af;flex:0 0 auto;transition:background .2s}
+.rg2wx-dot.on{background:#2faf5e;box-shadow:0 0 6px #2faf5e}
+.rg2wx-status.alert{color:#c62828;font-weight:600}
+.rg2wx-status.alert .rg2wx-dot{background:#c62828;box-shadow:0 0 6px #c62828}
+body.dark .rg2wx-status{color:#9aa7b6}
+body.dark .rg2wx-play{background:#2b7fd4}
+body.dark .rg2wx-play:hover{background:#3b8fe4}
+.rg2wx-topbar{position:fixed;top:0;left:0;right:0;z-index:99999;
+  background:linear-gradient(180deg,#d32f2f,#b3140f);color:#fff;
+  padding:.6rem 1rem;text-align:center;font:600 15px/1.35 system-ui,-apple-system,sans-serif;
+  box-shadow:0 2px 12px rgba(0,0,0,.35)}
+.rg2wx-topbar.warn{animation:rg2wxPulse 1.5s infinite}
+.rg2wx-topbar a{color:#fff;text-decoration:underline}
+.rg2wx-topbar .tb-ev{font-size:1.05rem}
+.rg2wx-topbar .tb-meta{font-weight:400;font-size:.85rem;opacity:.93;margin-top:2px}
+@keyframes rg2wxPulse{0%,100%{box-shadow:0 2px 12px rgba(0,0,0,.35)}50%{box-shadow:0 2px 24px 2px rgba(255,80,80,.6)}}
 </style>
 <script>
 (function(){
   var API="https://wx.rg2.io/api/alert";
-  function $(i){return document.getElementById(i)}
-  function esc(s){return String(s).replace(/[&<>]/g,function(m){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[m]})}
-  function fmtTs(t){return t?new Date(t*1000).toLocaleString():''}
-  function render(d){
-    var dot=$('rg2wx-dot');if(dot)dot.classList.toggle('on',!!d.decoder);
-    var b=$('rg2wx-banner'),a=d.active;if(!b)return;
-    if(a){b.className='rg2wx-banner alert'+(a.priority?' warn':'');
-      b.innerHTML='<div class="rg2wx-ev">'+esc(a.event)+'</div><div class="rg2wx-meta">'+
-        (a.areas&&a.areas.length?'FIPS '+esc(a.areas.join(', '))+' · ':'')+
-        'issued '+fmtTs(a.ts)+(a.station?' · '+esc(a.station):'')+'</div>';
-    }else{b.className='rg2wx-banner';
-      b.innerHTML='<div class="rg2wx-ok">No active alerts</div><div class="rg2wx-meta">monitoring SAME — turns red on a warning</div>';}
+  var bar=document.createElement("div");
+  bar.className="rg2wx-topbar"; bar.style.display="none";
+  document.body.appendChild(bar);
+
+  var audio=document.getElementById("rg2wx-audio");
+  var play=document.getElementById("rg2wx-play");
+  if(play&&audio){
+    play.addEventListener("click",function(){ if(audio.paused){audio.play();}else{audio.pause();} });
+    audio.addEventListener("play",function(){ play.classList.add("playing"); });
+    audio.addEventListener("pause",function(){ play.classList.remove("playing"); });
   }
-  function poll(){fetch(API,{cache:'no-store'}).then(function(r){return r.json()}).then(render).catch(function(){})}
-  poll();setInterval(poll,5000);
+
+  var dot=document.getElementById("rg2wx-dot");
+  var stxt=document.getElementById("rg2wx-stxt");
+  var status=document.getElementById("rg2wx-status");
+  function esc(s){return String(s).replace(/[&<>]/g,function(m){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[m];});}
+  function fmtClock(t){ if(!t)return""; try{return new Date(t*1000).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});}catch(e){return"";} }
+
+  function render(d){
+    if(dot) dot.classList.toggle("on",!!d.decoder);
+    var a=d&&d.active;
+    if(a){
+      var area=(a.nws&&a.nws.areaDesc)?a.nws.areaDesc:((a.areas&&a.areas.length)?("FIPS "+a.areas.join(", ")):"");
+      var until=a.expires?(" · until "+fmtClock(a.expires)):"";
+      var link=a.nws_url?(" &nbsp;<a href=\""+esc(a.nws_url)+"\" target=\"_blank\" rel=\"noopener\">details ↗</a>"):"";
+      bar.className="rg2wx-topbar"+(a.priority?" warn":"");
+      bar.innerHTML="<div class=\"tb-ev\">⚠ "+esc(a.event)+"</div><div class=\"tb-meta\">"+esc(area)+esc(until)+link+"</div>";
+      bar.style.display="block";
+      document.body.style.paddingTop=bar.offsetHeight+"px";
+      if(status) status.className="rg2wx-status alert";
+      if(stxt) stxt.textContent="Active alert — see top of page";
+    }else{
+      bar.style.display="none";
+      document.body.style.paddingTop="";
+      if(status) status.className="rg2wx-status";
+      if(stxt) stxt.textContent=d&&d.decoder?"Monitoring SAME · no active alerts":"Monitor offline";
+    }
+  }
+  function poll(){fetch(API,{cache:"no-store"}).then(function(r){return r.json();}).then(render).catch(function(){});}
+  poll(); setInterval(poll,5000);
 })();
 </script>
