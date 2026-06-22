@@ -290,8 +290,8 @@ fi
 
 cat > /etc/systemd/system/monitor.service <<'EOF'
 [Unit]
-Description=On-demand FM/AM monitor on the R2 (preempts P25)
-Conflicts=op25-ems.service rtltcp-bridge.service
+Description=On-demand FM/AM monitor on the R2 (coordinator-managed -> /scanner-atc.mp3)
+Conflicts=op25-ems.service rtltcp-bridge.service wx-on-r2.service
 After=network-online.target
 
 [Service]
@@ -301,15 +301,13 @@ Group=scanner
 Environment=LD_LIBRARY_PATH=/usr/local/lib
 EnvironmentFile=/etc/scanner-compute/icecast.env
 EnvironmentFile=-/var/lib/scanner-compute/monitor.env
-ExecStartPre=+/usr/bin/systemctl stop op25-watch.timer op25-ems rtltcp-bridge
-ExecStartPre=/bin/sleep 2
 ExecStart=/opt/scanner-compute/monitor-tune.sh
-RuntimeMaxSec=1800
-TimeoutStopSec=15
-ExecStopPost=+/usr/bin/systemctl restart rtltcp-bridge
-ExecStopPost=+/usr/bin/systemctl restart op25-ems
-ExecStopPost=+/usr/bin/systemctl start op25-watch.timer
+Restart=on-failure
+RestartSec=8
 EOF
+# NB: monitor.service no longer self-juggles op25 / auto-returns — the r2-mode
+# coordinator (below) owns ALL R2 stop/start + the Pi source bounce. scanner-api's
+# monitor_tune/stop delegate to r2-mode.sh (atc/noaa).
 
 # scanner-api (User=scanner) writes monitor.env then restarts/stops the unit.
 cat > /etc/sudoers.d/scanner-monitor <<'EOF'
@@ -317,6 +315,88 @@ scanner ALL=(root) NOPASSWD: /usr/bin/systemctl restart monitor.service, /usr/bi
 EOF
 chmod 0440 /etc/sudoers.d/scanner-monitor
 visudo -cf /etc/sudoers.d/scanner-monitor >/dev/null || { echo "FATAL: bad scanner-monitor sudoers"; rm -f /etc/sudoers.d/scanner-monitor; exit 1; }
+
+echo "==> R2-mode coordinator (NOAA 162.550 on the discone + single-authority switch)"
+# The discone/R2 is single-tuner: NOAA / P25 / ATC are mutually exclusive.
+# r2-mode.sh is the single authority — stop all R2 users, BOUNCE the Pi source
+# fresh (it degrades on client switches: op25 runs deaf otherwise), then start the
+# requested mode. wx-on-r2.service is NOAA (NFM 162.550 -> /wx.mp3) via the same
+# monitor_stream the airband monitor uses. scanner-api exposes /api/r2/{state,mode}.
+# NOTE (manual, not provisioned — security): the bounce SSHes .83 root -> the Pi as
+# a FORCED-COMMAND key authorized only to `systemctl restart sdr-source@airspy-r2`
+# (Pi ~rgardner/.ssh/authorized_keys + /etc/sudoers.d/r2-bounce on the Pi). Boot
+# enablement (NOAA-default vs op25-default) is left as-is; flip deliberately.
+if [ -f /opt/scanner-compute/wx-on-r2.sh ]; then
+  echo "    wx-on-r2.sh exists - keeping it"
+else
+  cat > /opt/scanner-compute/wx-on-r2.sh <<'E'
+#!/usr/bin/env bash
+# NOAA Weather Radio on the R2/discone -> rack Icecast /wx.mp3. SOAPY_ARGS/MON_*/
+# ICECAST_* injected by the unit's env (Environment= + icecast.env).
+set -euo pipefail
+exec bash -c "LD_LIBRARY_PATH=/usr/local/lib python3 /opt/scanner-compute/monitor_stream.py | \
+  ffmpeg -hide_banner -loglevel error -f s16le -ar 12500 -ac 1 -i - \
+    -codec:a libmp3lame -b:a 24k -content_type audio/mpeg -ice_name 'NOAA WX (discone)' -f mp3 \
+    icecast://source:$${ICECAST_SOURCE_PASSWORD}@$${ICECAST_HOST}:$${ICECAST_PORT}/wx.mp3"
+E
+  chmod +x /opt/scanner-compute/wx-on-r2.sh
+fi
+cat > /etc/systemd/system/wx-on-r2.service <<'E'
+[Unit]
+Description=NOAA Weather Radio on the R2/discone (NFM 162.550 -> /wx.mp3)
+Conflicts=op25-ems.service rtltcp-bridge.service monitor.service
+After=network-online.target
+[Service]
+Type=simple
+User=scanner
+Group=scanner
+Environment=SOAPY_ARGS=driver=remote,remote=tcp://radio.srvr:55003,remote:driver=airspy
+Environment=MON_FREQ=162550000
+Environment=MON_MODE=nfm
+Environment=MON_GAINS=LNA:14,MIX:13,VGA:14
+Environment=MON_SQUELCH=0.0001
+EnvironmentFile=/etc/scanner-compute/icecast.env
+ExecStart=/opt/scanner-compute/wx-on-r2.sh
+Restart=always
+RestartSec=8
+[Install]
+WantedBy=multi-user.target
+E
+if [ -f /opt/scanner-compute/r2-mode.sh ]; then
+  echo "    r2-mode.sh exists - keeping it"
+else
+  cat > /opt/scanner-compute/r2-mode.sh <<'E'
+#!/usr/bin/env bash
+# Single authority for the R2/discone source. Stops all R2 users, bounces the Pi
+# source fresh (forced-command key; degrades on switches), then starts the mode.
+set -uo pipefail
+MODE="$${1:-}"
+ALL="wx-on-r2.service monitor.service op25-watch.timer op25-ems.service rtltcp-bridge.service"
+systemctl stop $ALL 2>/dev/null || true
+sleep 2
+if timeout 12 ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i /root/.ssh/id_ed25519 rgardner@radio.srvr bounce 2>/dev/null; then
+  echo "r2-mode: R2 source bounced fresh"
+else
+  echo "r2-mode: WARN source bounce failed (op25 may run deaf)" >&2
+fi
+sleep 5
+case "$MODE" in
+  noaa) systemctl reset-failed wx-on-r2.service 2>/dev/null || true; systemctl start wx-on-r2.service ;;
+  p25)  systemctl reset-failed rtltcp-bridge.service op25-ems.service 2>/dev/null || true
+        systemctl start rtltcp-bridge.service op25-ems.service op25-watch.timer ;;
+  atc)  systemctl reset-failed monitor.service 2>/dev/null || true; systemctl start monitor.service ;;
+  *)    echo "usage: r2-mode.sh {noaa|p25|atc}" >&2; exit 2 ;;
+esac
+echo "r2-mode -> $MODE"
+E
+  chmod +x /opt/scanner-compute/r2-mode.sh
+fi
+cat > /etc/sudoers.d/scanner-r2mode <<'E'
+scanner ALL=(root) NOPASSWD: /opt/scanner-compute/r2-mode.sh noaa, /opt/scanner-compute/r2-mode.sh p25, /opt/scanner-compute/r2-mode.sh atc
+E
+chmod 0440 /etc/sudoers.d/scanner-r2mode
+visudo -cf /etc/sudoers.d/scanner-r2mode >/dev/null || { echo "FATAL: bad scanner-r2mode sudoers"; rm -f /etc/sudoers.d/scanner-r2mode; exit 1; }
+systemctl daemon-reload
 
 # Liquidsoap, NOT bare ffmpeg: op25 emits UDP PCM only DURING calls, so a
 # plain ffmpeg chain stalls between calls and Icecast drops the source
@@ -546,13 +626,13 @@ WantedBy=timers.target
 EOF
 
 systemctl daemon-reload
-systemctl enable op25-watch.timer >/dev/null 2>&1 || true
-systemctl start op25-watch.timer || true
-# The bridge is enabled at boot (op25-ems Requires it). Harmless when up alone —
-# it only opens the remote R2 once op25 connects. op25-ems itself stays
-# laid-down-not-started (cutover enables it by hand), same as before.
-systemctl enable rtltcp-bridge.service >/dev/null 2>&1 || true
-systemctl restart rtltcp-bridge.service || true
+# Boot model (2026-06-18 flip): NOAA is the R2's 24/7 default (wx-on-r2 enabled);
+# P25/ATC are on-demand via r2-mode.sh, so the op25 chain + bridge + watchdog are
+# laid down but NOT boot-enabled — the coordinator starts op25-ems on demand (it
+# pulls rtltcp-bridge via Requires, and r2-mode.sh starts op25-watch.timer too).
+# Enablement only here; don't start/stop — the coordinator owns the running mode.
+systemctl enable wx-on-r2.service >/dev/null 2>&1 || true
+systemctl disable op25-ems.service rtltcp-bridge.service op25-watch.timer >/dev/null 2>&1 || true
 
 echo "==> provisioning complete (units laid down, not started — cutover enables them)"
 %{ for id, dev in devices ~}

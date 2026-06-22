@@ -293,6 +293,21 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   Pi-side (the scheduler needs the SDR), so the .84 tuner proxies every
   `/api/wxsat/*` call to the Pi via `WXSAT_UPSTREAM=http://radio.srvr:8080`
   (radio repo 2026-06-14). Keep the Pi sdr-tuner running.)
+  **`radio.rg2.io/dash` is the unified whole-stack control surface** (2026-06-18,
+  radio `unified-gui`): source tabs FM/AM/NOAA/P25/ATC over `/api/stack-state`;
+  `/api/scanner/<path>` proxies scanner-api (.83) → one origin. NOAA/P25/ATC switch
+  the single-tuner discone via the **R2-mode coordinator** (`r2-mode.sh` on .83 —
+  stop-all → Pi source bounce → start; NOAA is the 24/7 default, P25/ATC preempt).
+  `stack-state` reads `r2_role` from the coordinator (`.83 /api/r2/state`), NOT the
+  mksafe-padded mounts (`/ems.mp3` + `/scanner-atc.mp3` stay published when idle).
+  Extras: **live A/B antenna compare** (HF+ `/am-a.mp3` vs dx-R2/B `/am-b.mp3`,
+  instant toggle; `am-compare-a/b.service`); **editable ATC presets**
+  (`/var/lib/sdr-streams/atc_presets.json`); **ATC recording/scheduling** —
+  `/api/atc-rec/*` + the `atc-rec` 1-min timer tunes ATC for a window, records
+  `/scanner-atc.mp3` to `/var/lib/sdr-streams/atc-rec/`, returns to NOAA, prunes
+  past N days (one recording at a time; preempts P25/NOAA). 🛠 debug window =
+  live `/api/debug-log`. Headless `/dash` screenshots: chromium + puppeteer-core
+  on codeserver.)
 - `ems.rg2.io` → **192.168.6.83:8081** (scanner-api bridge — the Android
   app's scanner backend; deployed from the scanner repo). Also serves a human
   **EMS captions UI at `/`** (live caption + transcript log from
@@ -309,7 +324,14 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   speakers/push) + logs. NPM host created (clone of radio.rg2.io). DNS resolves
   via the `*.rg2.io` wildcard, but **needs a per-domain TLS cert** (cloned host
   serves radio.rg2.io's cert). `POST /api/test` injects a test alert. The HA
-  webhook needs a non-default `User-Agent` — Cloudflare 403s `Python-urllib`.)
+  webhook needs a non-default `User-Agent` — Cloudflare 403s `Python-urllib`.
+  **Embedded into `weather.bobgardner.org`** (weewx 5 / Belchertown skin on
+  `weather2.srvr` = 192.168.6.32, ssh `rgardner`): `tools/wx-embed.html` is the
+  drop-in widget (top alert bar + minimal player, consumes `/api/alert` CORS).
+  weewx gotcha — include the `.inc` with **`#include raw`** (else Cheetah parses
+  the JS `$()` → "cannot find 'i'", report aborts), and weewx caches the compiled
+  template by the parent `.tmpl` mtime, so after editing `touch` the `.tmpl` +
+  `weectl report run`. Details: [[weather2-weewx-belchertown-wx-widget]] memory.)
 - `ems.rg2.io` now serves the **V1-style amber-LCD tuner** at `/` (NFM/AM presets
   NOAA WX/Marine/EMS/KCGI-Tower-125.525/Memphis-Center, squelch, direct tune) →
   `/api/monitor/{tune,stop}` → `monitor.service` (NFM/AM on the R2, **preempts

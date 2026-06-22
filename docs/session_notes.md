@@ -4,7 +4,78 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
-## 2026-06-18 (latest) — AM antenna selection (A/B/C/HF+) + HF+ YouLoop AM source
+## 2026-06-22 (latest) — NOAA wx page embedded into weewx/Belchertown (weather.bobgardner.org)
+
+**State: the NOAA Weather Radio player + SAME/EAS alert are now on the public
+weewx station page. Widget source-of-truth = `tools/wx-embed.html` (committed
+52aa519); deployed on `weather2.srvr` (192.168.6.32) at
+`/etc/weewx/skins/Belchertown/index_hook_after_station_info.inc`. weather2 has no
+git repo — that copy is hand-deployed (+ weather2-only webcam imgs). Reference:
+[[weather2-weewx-belchertown-wx-widget]] memory.**
+
+- **Redesign:** alert banner → a **fixed full-width top bar** injected to `<body>`,
+  shown only during an active alert (pulses on priority, area + expiry + NWS link).
+  Player rebuilt **minimal** — round play/pause button, "NOAA Weather Radio",
+  live/monitoring status dot; light theme + `body.dark` override (drops old dark
+  card). User confirmed top bar via a `POST /api/test` (RWT, ~30 s window).
+- **Two weewx/Cheetah gotchas (cost real time):** (1) the `.inc` is Cheetah-parsed
+  on `#include` → JS `$()` read as a template var → `cannot find 'i'`, the whole
+  `index.html.tmpl` render aborts and weewx silently serves the LAST good page
+  (looked "frozen" for days; only `index.html` was failing). FIX = change the
+  template include to **`#include raw "..."`**. (2) weewx **caches the compiled
+  template by the `.tmpl` mtime** + bakes the `#include` in at compile time —
+  editing only the `.inc` does nothing until you `touch index.html.tmpl` +
+  `sudo weectl report run`. `#raw…#end raw` in-file did NOT work (Cheetah 3.3.1
+  rejected `#end raw`). After a Belchertown skin upgrade, re-apply `#include raw`.
+- **Builds on** the 2026-06-21 `wx_alert.py` county filter (`WX_FIPS_FILTER`
+  029031 Cape locked + toggleable neighbors) + live `api.weather.gov` warning text
+  (commit 71004af) — the alerts the embedded bar now surfaces.
+- Headless chromium screenshots of weather2 do NOT work from codeserver (every run
+  fails to write a file); verify via `curl http://192.168.6.32/`.
+
+## 2026-06-18 — Unified stack GUI (/dash): coordinator, A/B, ATC presets + recording
+
+**State: `radio.rg2.io/dash` is now the whole-stack control surface. Built across
+radio (`unified-gui`), scanner (`r2-mode-coordinator`), platform
+(`scanner-r2-coordinator`, `radio-ab-compare`). Live-deployed on .84 (hand-pushed;
+`app.py.preunified.bak` = rollback). Design doc: radio `docs/UNIFIED_GUI_DESIGN.md`.**
+
+- **Gateway + source tabs (Phase 1):** tabs FM/AM/NOAA/P25/ATC over
+  `/api/stack-state`; `/api/scanner/<path>` proxies scanner-api (.83) → one origin.
+  FM/AM tune via `/api/tune`; NOAA/P25/ATC drive the coordinator.
+- **R2-mode coordinator (Phase 4):** the single-tuner discone/R2 switches
+  NOAA(default)↔P25↔ATC via `r2-mode.sh` on .83 (stop-all → REQUIRED Pi source
+  bounce via a forced-command key → start mode). Boot model flipped: NOAA is the
+  24/7 default; P25/ATC are deliberate preempts. `monitor.service` simplified.
+  scanner-api `/api/r2/{state,mode}`. NOTE: no auto-return for *manual* ATC tunes —
+  they leave `monitor.service` running until stopped.
+- **Debug window:** 🛠 panel — live feed of commands rack↔attic + stack transitions
+  (`/api/debug-log`, after_request capture).
+- **Live A/B antenna compare:** AM tab — same station on HF+ (`/am-a.mp3`) +
+  dx-R2/B (`/am-b.mp3`) at once, instant in-GUI toggle (two muted audio elements);
+  the dx-R2 side preempts FM. `am-compare-a/b.service` on .84.
+- **Phase 2 beautify:** full visual pass — glassy cards, per-source accent colors,
+  segmented tabs + antenna control, sticky player, responsive.
+- **Editable ATC presets:** server-persisted (`/var/lib/sdr-streams/atc_presets.json`),
+  add/rename/delete in `/dash`. Seed corrected from the V1 scanner `AVIATION_PRESETS`
+  (KCGI Tower **125.525** — was wrongly 119.0; Memphis Center 131.36/132.5363).
+- **ATC recording + scheduling:** schedule a window (or rec-now) → the `atc-rec`
+  tick (1-min systemd timer on .84) tunes ATC for the window, records
+  `/scanner-atc.mp3` to one MP3/job (**waits for the mount** post-bounce so ffmpeg
+  doesn't die on the 404), returns to NOAA, prunes past N days (default 14).
+  `/api/atc-rec/*`; ATC tab Recordings panel (play/download/delete + retention).
+  **One recording at a time; a scheduled ATC window preempts P25/NOAA** (single-tuner).
+- **R2 idle-display fix:** `/api/stack-state` derives `r2_role` from the coordinator
+  (.83 `/api/r2/state`), not the icecast mounts — `/ems.mp3` + `/scanner-atc.mp3`
+  stay mksafe-published so they falsely read "live". ATC/P25 now read idle unless
+  they hold the R2.
+- **Tooling:** chromium + fonts-noto-color-emoji + puppeteer-core installed on
+  codeserver for headless `/dash` screenshots.
+
+**Next:** Phase 3 — multichannel-FM channel grid (when that branch lands). Optional:
+repeat schedules / ADS-B-triggered ATC recording.
+
+## 2026-06-18 — AM antenna selection (A/B/C/HF+) + HF+ YouLoop AM source
 
 **State: the rack radio tuner gained per-station AM antenna selection across the
 dx-R2 ports (A/B/C) AND the Airspy HF+ on the new YouLoop. Built + deployed live
