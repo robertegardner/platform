@@ -7,8 +7,11 @@ and decodes SAME (Specific Area Message Encoding) alerts off the same audio:
     ffmpeg -i <wx.mp3> -f s16le -ar 22050 -ac 1 - | multimon-ng -a EAS -t raw -
 
 On a decoded SAME header it parses the event (TOR/SVR/FFW…), the FIPS areas and
-the valid time, then RESPONDS: shows the banner, fires a configurable webhook
-(Home Assistant — announce on house speakers / push), and logs it. Stdlib only.
+the valid time, classifies it into a 3-tier severity (extreme/severe/advisory)
+plus a category (warning/watch/statement/test), then RESPONDS: shows a
+tier-colored banner, fires a configurable webhook (Home Assistant — the payload
+carries `tier`/`category` so one automation can scale the house response by
+severity), and logs it. Stdlib only.
 
 On an active alert it also pulls the live warning text from api.weather.gov (best
 effort, matched by SAME geocode) and links the county's NWS hazards page. A right
@@ -96,8 +99,43 @@ EVENT_NAMES = {
     "RWT": "Required Weekly Test", "RMT": "Required Monthly Test", "DMO": "Practice/Demo",
     "ADR": "Administrative Message", "NPT": "National Periodic Test",
 }
-# Warnings that warrant the most aggressive response (red banner + priority webhook).
-HIGH_PRIORITY = {"TOR", "SVR", "FFW", "EWW", "HUW", "EQW", "EAN", "BZW", "DSW", "FRW"}
+# ---- Response tiers --------------------------------------------------------
+# The house reaction is keyed off a 3-tier severity, NOT the raw event code, so
+# Home Assistant automations branch on a stable `tier` instead of a SAME table:
+#   extreme  -> whole-house response (all speakers/lights)
+#   severe   -> a lesser, main-room response
+#   advisory -> banner + log only, NO house action (watches, statements, tests).
+# Unlisted codes fall through to advisory. `priority` (extreme|severe) is kept
+# for the red banner pulse and backward compatibility with existing webhooks.
+TIER_EXTREME = frozenset({"TOR", "FFW", "BZW", "EWW", "HUW", "EQW", "EAN",
+                          "DSW", "FRW", "TSW"})
+TIER_SEVERE = frozenset({"SVR", "FLW", "WSW", "HWW", "TRW", "CFW", "SMW", "SVS"})
+# A few statement codes that NWS issues to UPDATE an in-force warning ride along
+# at the warning's tier (TOR/SVR/FFW have W-then-S follow-ups) — handled by the
+# explicit SVS membership above; other statements stay advisory.
+
+
+def tier_for(code):
+    if code in TIER_EXTREME:
+        return "extreme"
+    if code in TIER_SEVERE:
+        return "severe"
+    return "advisory"
+
+
+# SAME EEE convention: 3rd letter W=warning, A=watch, S=statement. Tests/admin
+# are special-cased, and TOR/SVR are the two legacy warning codes that end in R
+# rather than W (the convention pre-dates them) so they need an explicit override.
+_TEST_CODES = frozenset({"RWT", "RMT", "DMO", "NPT", "ADR"})
+_CATEGORY_OVERRIDE = {"TOR": "warning", "SVR": "warning", "EAN": "warning"}
+
+
+def category_for(code):
+    if code in _TEST_CODES:
+        return "test"
+    if code in _CATEGORY_OVERRIDE:
+        return _CATEGORY_OVERRIDE[code]
+    return {"W": "warning", "A": "watch", "S": "statement"}.get(code[2:3], "other")
 
 STATE = {"active": None, "recent": [], "decoder": False, "updated": 0}
 _LOCK = threading.Lock()
@@ -124,17 +162,20 @@ def parse_same(header):
             dur_secs = int(duration[:2]) * 3600 + int(duration[2:]) * 60
         except (ValueError, IndexError):
             dur_secs = 1800
+        tier = tier_for(event)
         return {
             "event_code": event,
             "event": EVENT_NAMES.get(event, event),
             "org": org, "areas": areas, "duration": duration,
             "issued": issued, "station": station,
-            "priority": event in HIGH_PRIORITY,
+            "tier": tier, "category": category_for(event),
+            "priority": tier in ("extreme", "severe"),
             "raw": h, "ts": ts, "expires": ts + (dur_secs or 1800),
         }
     except (IndexError, ValueError):
         ts = int(time.time())
         return {"event_code": "???", "event": "Unparsed SAME", "raw": h,
+                "tier": "advisory", "category": "other",
                 "priority": False, "areas": [], "ts": ts, "expires": ts + 1800}
 
 
@@ -192,7 +233,10 @@ def fetch_nws_text(alert):
                 continue
             cand = {"event": p.get("event") or "", "headline": p.get("headline") or "",
                     "areaDesc": p.get("areaDesc") or "", "description": p.get("description") or "",
-                    "instruction": p.get("instruction") or ""}
+                    "instruction": p.get("instruction") or "",
+                    # NWS's own grading — surfaced alongside our tier.
+                    "severity": p.get("severity") or "", "urgency": p.get("urgency") or "",
+                    "certainty": p.get("certainty") or "", "messageType": p.get("messageType") or ""}
             if EVENT_NAMES.get(code, "").lower() == str(p.get("event", "")).lower():
                 return cand                 # exact event match wins
             best = best or cand
@@ -295,6 +339,14 @@ main{flex:1;min-width:0}
 .banner{border-radius:12px;padding:1.1rem 1.2rem;margin-bottom:1.2rem;border:1px solid var(--line);background:var(--panel)}
 .banner.alert{background:linear-gradient(180deg,#3a1416,#241016);border-color:#6e2630}
 .banner.alert.warn{animation:pulse 1.4s infinite}
+.banner.alert.severe{background:linear-gradient(180deg,#3a2a10,#241c10);border-color:#6e5326}
+.banner.alert.severe .ev{color:var(--amber)}
+.banner.alert.advisory{background:linear-gradient(180deg,#14233a,#101826);border-color:#2c4366}
+.banner.alert.advisory .ev{color:var(--accent)}
+.banner .tier{display:inline-block;font-size:.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-radius:999px;padding:.1rem .5rem;margin-right:.5rem;vertical-align:middle;border:1px solid var(--line)}
+.banner.alert.warn .tier{color:var(--red);border-color:#6e2630}
+.banner.alert.severe .tier{color:var(--amber);border-color:#6e5326}
+.banner.alert.advisory .tier{color:var(--accent);border-color:#2c4366}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,90,90,.0)}50%{box-shadow:0 0 24px 0 rgba(255,90,90,.35)}}
 .banner .ev{font-size:1.5rem;font-weight:700}
 .banner.alert .ev{color:var(--red)}
@@ -349,13 +401,17 @@ function fmtTs(t){if(!t)return'';var d=new Date(t*1000);return d.toLocaleString(
 function render(d){
  $('dot').classList.toggle('on',!!d.decoder);
  var b=$('banner'),a=d.active;
- if(a){b.className='banner alert'+(a.priority?' warn':'');
-  var h='<div class="ev">'+esc(a.event)+'</div><div class="meta">'+(a.areas&&a.areas.length?'FIPS '+esc(a.areas.join(', '))+' &middot; ':'')+'issued '+fmtTs(a.ts)+(a.station?' &middot; '+esc(a.station):'')+'</div>';
+ if(a){
+  var tier=a.tier||(a.priority?'extreme':'advisory');
+  b.className='banner alert '+(tier==='extreme'?'warn':tier);
+  var tb='<span class="tier">'+esc(tier)+(a.category&&a.category!=='other'?' &middot; '+esc(a.category):'')+'</span>';
+  var h='<div class="ev">'+tb+esc(a.event)+'</div><div class="meta">'+(a.areas&&a.areas.length?'FIPS '+esc(a.areas.join(', '))+' &middot; ':'')+'issued '+fmtTs(a.ts)+(a.station?' &middot; '+esc(a.station):'')+'</div>';
   if(a.raw)h+='<div class="raw">'+esc(a.raw)+'</div>';
   if(a.nws_url)h+='<div class="nwslink"><a href="'+esc(a.nws_url)+'" target="_blank" rel="noopener">View on weather.gov &#8599;</a></div>';
   if(a.nws){var n=a.nws;h+='<div class="nws">'
    +(n.headline?'<div class="nh">'+esc(n.headline)+'</div>':'')
    +(n.areaDesc?'<div class="na">'+esc(n.areaDesc)+'</div>':'')
+   +((n.severity||n.urgency||n.certainty)?'<div class="na">NWS: '+esc([n.severity,n.urgency,n.certainty].filter(Boolean).join(' / '))+'</div>':'')
    +(n.description?'<div class="nd">'+esc(n.description)+'</div>':'')
    +(n.instruction?'<div class="ni"><b>Instructions:</b>\\n'+esc(n.instruction)+'</div>':'')
    +'</div>';}
@@ -439,13 +495,22 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"county {f5} -> {'on' if want else 'off'}")
             self._json(200, counties_payload())
         elif self.path == "/api/test":
+            try:
+                body = json.loads(raw or b"{}")
+            except ValueError:
+                body = {}
+            code = str(body.get("event_code", "RWT")).upper()[:3] or "RWT"
             now = int(time.time())
-            handle_alert({"event_code": "RWT", "event": "Required Weekly Test (manual)",
+            tier = tier_for(code)
+            handle_alert({"event_code": code,
+                          "event": EVENT_NAMES.get(code, code) + " (manual test)",
                           "org": "WXR", "areas": ["029031"], "duration": "0015",
-                          "issued": "", "station": "TEST", "priority": False,
-                          "raw": "ZCZC-WXR-RWT-029031+0015-TEST-",
+                          "issued": "", "station": "TEST",
+                          "tier": tier, "category": category_for(code),
+                          "priority": tier in ("extreme", "severe"),
+                          "raw": f"ZCZC-WXR-{code}-029031+0015-TEST-",
                           "ts": now, "expires": now + 30})  # short so the demo clears
-            self._json(200, {"ok": True})
+            self._json(200, {"ok": True, "event_code": code, "tier": tier})
         else:
             self._json(404, {"error": "not found"})
 

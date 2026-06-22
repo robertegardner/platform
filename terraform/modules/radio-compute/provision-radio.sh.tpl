@@ -643,6 +643,11 @@ else
 # wx.rg2.io page + SAME alert decoder. Set HA_WEBHOOK_URL to a Home Assistant
 # webhook (e.g. https://ha.rg2.io/api/webhook/<id>) to announce alerts on house
 # speakers / push. Empty = banner + log only.
+# The webhook JSON includes a 3-tier "tier" field (extreme|severe|advisory) and a
+# "category" (warning|watch|statement|test) so a single HA automation can branch
+# the house response by severity (extreme = whole-house, severe = lesser, advisory
+# = no action). It also carries event_code and, once enriched, nws.severity/
+# urgency/certainty from api.weather.gov.
 # WX_FIPS_FILTER: comma-separated SAME area allowlist (matched on the trailing 5
 # digits). The KPAH transmitter carries the whole tri-state region; this keeps us
 # to Cape Girardeau County, MO (029031). Empty = alert on every county it sends.
