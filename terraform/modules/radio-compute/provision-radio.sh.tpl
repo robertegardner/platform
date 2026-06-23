@@ -241,16 +241,18 @@ if [[ "$MODE" == "wbfm" || "$MODE" == "fm" ]]; then
   # stereo_decode entirely (no noisy 38 kHz L-R subcarrier — best for weak/talk).
   # STEREO=1 -> stereo_decode matrix (hardened carrier recovery: EMA amp + crest
   # clamp + ramped honesty gate). --scale 2.0 / --pilot-floor 0.0015 match the MPX
-  # scale. ffmpeg does per-channel 75us de-emphasis + 15k LP, then loudnorm to
-  # -16 LUFS / -1.5 dBTP. The de-emphasis leaves the stereo matrix ~14 dB low
-  # (measured -30.5 LUFS) so loudnorm supplies the make-up gain (and evens out
-  # per-station level). The old alimiter=level=false applied NO gain — that was
-  # the "quiet stereo" bug.
+  # scale. BOTH branches end ffmpeg in the same loudnorm=I=-16:TP=-1.5:LRA=11
+  # after 75us de-emphasis + 15k LP, so the mono/stereo UI toggle is loudness-
+  # matched at -16 LUFS / -1.5 dBTP (loudnorm also evens out per-station level).
+  # Why it's needed: post-de-emphasis the audio sits well below 0 dBFS (stereo
+  # matrix measured -30.5 LUFS, ~14 dB low) and nothing else supplies make-up
+  # gain — the old stereo alimiter=level=false applied none ("quiet stereo" bug),
+  # and bare mono had no normalizer at all.
   if [[ "$${STEREO:-1}" == "0" ]]; then
     exec bash -c "python3 /opt/sdr-tuner/wbfm_stream.py | \
       tee >(redsea -r 250000 --output json 2>/dev/null | FREQ='$FREQ' /opt/sdr-tuner/rds_watcher.py) | \
       ffmpeg -hide_banner -loglevel warning -f s16le -ar 250000 -ac 1 -i - \
-             -af 'aemphasis=mode=reproduction:type=75fm,lowpass=15000' \
+             -af 'aemphasis=mode=reproduction:type=75fm,lowpass=15000,loudnorm=I=-16:TP=-1.5:LRA=11' \
              -ar 48000 -ac 1 \
              -c:a libmp3lame -b:a $BITRATE -content_type audio/mpeg \
              -f mp3 '$ICECAST_URL'"
