@@ -620,6 +620,58 @@ def emwin_index():
         return items
 
 
+# ---- L2 product legends (colorbar from SatDump's LUT + nominal GOES-R range) -
+LUT_DIR = os.environ.get("GOES_LUT_DIR",
+                         os.path.join(os.path.dirname(os.path.abspath(__file__)), "luts"))
+# Product name (the L2 composite) -> {lut, unit, lo, hi, label}. The gradient is
+# exact (SatDump's LUT); the value range is the standard GOES-R L2 product range
+# the 8-bit DPI maps over (shown as "nominal").
+L2_SCALES = {
+    "AWG Cloud Height Algorithm (ACHA)": {"lut": "acha.png", "unit": "km", "lo": 0, "hi": 18, "label": "Cloud-top height"},
+    "Cloud top Temperature (ACHT)":      {"lut": "acht.png", "unit": "°C", "lo": -90, "hi": 30, "label": "Cloud-top temperature"},
+    "Derived Stability Indices - CAPE":  {"lut": "dsi-cape.png", "unit": "J/kg", "lo": 0, "hi": 5000, "label": "CAPE (instability)"},
+    "Land Surface Temperature":          {"lut": "lst.png", "unit": "°C", "lo": -25, "hi": 50, "label": "Land surface temperature"},
+    "Sea Surface Temperature":           {"lut": "sst.png", "unit": "°C", "lo": -2, "hi": 35, "label": "Sea surface temperature"},
+    "Total Precipitable Water":          {"lut": "tpw.png", "unit": "mm", "lo": 0, "hi": 60, "label": "Total precipitable water"},
+    "Rain Rate Per Quarter Hour":        {"lut": "rrqpe.png", "unit": "mm/hr", "lo": 0, "hi": 50, "label": "Rain rate"},
+}
+_LUT_CACHE = {}
+
+
+def _lut_colors(lut):
+    """Sampled hex colors across a SatDump LUT PNG (a 256-wide ramp). Cached."""
+    if lut in _LUT_CACHE:
+        return _LUT_CACHE[lut]
+    cols = []
+    try:
+        with Image.open(os.path.join(LUT_DIR, lut)) as im:
+            im = im.convert("RGB")
+            w = im.width
+            px = im.load()
+            for i in range(64):                       # 64 stops -> smooth CSS gradient
+                x = min(w - 1, round(i * (w - 1) / 63))
+                r, g, b = px[x, 0]
+                cols.append("#%02x%02x%02x" % (r, g, b))
+    except (OSError, ValueError) as e:
+        log(f"lut load {lut}: {e}")
+    _LUT_CACHE[lut] = cols
+    return cols
+
+
+def legend_for_group(group):
+    """Legend descriptor for an 'L2 · <product>' browse group, or None."""
+    if not group or not group.startswith("L2 · "):
+        return None
+    s = L2_SCALES.get(group[len("L2 · "):])
+    if not s:
+        return None
+    cols = _lut_colors(s["lut"])
+    if not cols:
+        return None
+    return {"label": s["label"], "unit": s["unit"], "lo": s["lo"], "hi": s["hi"],
+            "mid": round((s["lo"] + s["hi"]) / 2, 1), "colors": cols}
+
+
 # ---- HTTP ------------------------------------------------------------------
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -645,7 +697,12 @@ header h1{font-size:1.05rem;font-weight:650}.dim{color:var(--dim);font-size:.82r
 .empty{color:var(--dim);padding:2rem;text-align:center}
 dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);max-width:96vw;max-height:96vh;padding:0}
 dialog::backdrop{background:rgba(0,0,0,.7)}
-dialog img{display:block;max-width:94vw;max-height:84vh;width:auto;height:auto}
+dialog img{display:block;max-width:94vw;max-height:78vh;width:auto;height:auto}
+#legend{padding:.6rem 1rem .8rem}#legend:empty{display:none}
+#legend .lt{font-size:.8rem;font-weight:600;margin-bottom:.3rem}
+#legend .lb{height:16px;border-radius:4px;border:1px solid var(--line)}
+#legend .lx{display:flex;justify-content:space-between;font-size:.72rem;color:var(--dim);margin-top:.2rem;font-variant-numeric:tabular-nums}
+#legend .ln{font-size:.66rem;color:var(--dim);opacity:.7;margin-top:.1rem}
 dialog .dh{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.6rem 1rem;border-bottom:1px solid var(--line)}
 dialog .dh select,dialog .dh button{background:#1a2433;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:.35rem .6rem;font:inherit;font-size:.82rem;cursor:pointer}
 </style></head><body>
@@ -655,7 +712,7 @@ dialog .dh select,dialog .dh button{background:#1a2433;color:var(--text);border:
 <div class="tabs" id="tabs"></div>
 <div class="grid" id="grid"><div class="empty">loading…</div></div>
 </div>
-<dialog id="dlg"><div class="dh"><select id="comp"></select><label class="dim" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="ovl">overlay</label><a class="dim" id="full" target="_blank" rel="noopener" style="text-decoration:underline">full res &#8595;</a><span class="dim" id="dlgmeta"></span><button id="dlgx">close</button></div><img id="dlgimg" alt=""></dialog>
+<dialog id="dlg"><div class="dh"><select id="comp"></select><label class="dim" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="ovl">overlay</label><a class="dim" id="full" target="_blank" rel="noopener" style="text-decoration:underline">full res &#8595;</a><span class="dim" id="dlgmeta"></span><button id="dlgx">close</button></div><img id="dlgimg" alt=""><div id="legend"></div></dialog>
 <script>
 var $=function(i){return document.getElementById(i)};var IMG="/api/goes/image/";
 var GROUPS=[];var cur=null;var CAPS=[];
@@ -680,7 +737,13 @@ function open(id){var c=CAPS.find(function(x){return x.id===id});if(!c)return;
   function show(){var rel=encodeURI(c.dir+'/'+$('comp').value);
     $('dlgimg').src=$('ovl').checked?(IMG+rel+'?overlay=1'):(IMG+'preview/'+rel);  // light preview, not the 23MB raw
     $('full').href=IMG+rel;}
-  $('comp').value=c.preferred||opts[0];show();$('comp').onchange=show;$('ovl').onchange=show;$('dlg').showModal();}
+  $('comp').value=c.preferred||opts[0];show();$('comp').onchange=show;$('ovl').onchange=show;
+  $('legend').innerHTML='';
+  fetch('/api/goes/legend?group='+encodeURIComponent(c.group||''),{cache:'no-store'}).then(function(r){return r.json()}).then(function(g){
+    if(!g||!g.colors)return;
+    $('legend').innerHTML='<div class="lt">'+esc(g.label)+'</div><div class="lb" style="background:linear-gradient(to right,'+g.colors.join(',')+')"></div><div class="lx"><span>'+g.lo+'</span><span>'+g.mid+'</span><span>'+g.hi+' '+esc(g.unit)+'</span></div><div class="ln">nominal GOES-R product range</div>';
+  }).catch(function(){});
+  $('dlg').showModal();}
 $('dlgx').onclick=function(){$('dlg').close()};
 function loadGroups(){fetch('/api/goes/groups',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){GROUPS=d.groups||[];if(!cur&&GROUPS.length)cur=GROUPS[0].group;tabs();loadCaps();}).catch(function(){})}
 function loadCaps(){if(!cur)return;fetch('/api/goes/captures?group='+encodeURIComponent(cur)+'&recent=180',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){CAPS=d.captures||[];render();}).catch(function(){})}
@@ -874,6 +937,8 @@ class Handler(BaseHTTPRequestHandler):
                 n = 0
             self._json(200, {"captures": caps[:n] if n > 0 else caps,
                              "total": len(caps), "preferred": PREFERRED})
+        elif path == "/api/goes/legend":
+            self._json(200, legend_for_group(params.get("group", "")) or {})
         elif path.startswith("/api/goes/image/thumb/"):
             rel = path[len("/api/goes/image/thumb/"):]
             t = ensure_thumb(rel)

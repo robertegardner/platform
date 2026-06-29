@@ -88,6 +88,7 @@ resource "null_resource" "provision" {
     provision_hash = sha256(local.provision_script)
     gallery_hash   = filesha256("${path.module}/goes_gallery.py")
     states_hash    = filesha256("${path.module}/us_states.geojson")
+    luts_hash      = sha256(join(",", [for f in fileset("${path.module}/luts", "*.png") : filesha256("${path.module}/luts/${f}")]))
   }
 
   connection {
@@ -119,6 +120,13 @@ resource "null_resource" "provision" {
   provisioner "file" {
     source      = "${path.module}/us_states.geojson"
     destination = "/tmp/us_states.geojson"
+  }
+
+  # SatDump L2 colormap LUTs (256-step ramps) for the gallery's product legends.
+  # Directory upload -> /tmp/luts/; the script copies them to /opt/goes-archive/luts.
+  provisioner "file" {
+    source      = "${path.module}/luts"
+    destination = "/tmp"
   }
 
   # Single && chain so a failing script can't be masked by rm -f exiting 0

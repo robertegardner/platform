@@ -128,6 +128,9 @@ cp /tmp/goes_gallery.py /opt/goes-archive/goes_gallery.py
 chmod 0755 /opt/goes-archive/goes_gallery.py
 # US state boundaries for the map overlay (provisioner-managed, always refreshed).
 [ -f /tmp/us_states.geojson ] && cp /tmp/us_states.geojson /opt/goes-archive/us_states.geojson
+# SatDump L2 colormap LUTs for the gallery's product legends.
+install -d -m 0755 /opt/goes-archive/luts
+[ -d /tmp/luts ] && cp /tmp/luts/*.png /opt/goes-archive/luts/ 2>/dev/null
 
 # Tunables are write-if-absent so on-box calibration (crop box, locality window)
 # survives a re-apply.
