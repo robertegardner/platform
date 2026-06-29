@@ -56,7 +56,7 @@ cat > /usr/local/sbin/goes-pull.sh <<EOF
 # platform-managed (goes-archive): incremental, non-destructive pull.
 set -uo pipefail
 exec rsync -az --timeout=120 \
-  --exclude='L2/' --exclude='Admin Messages/' \
+  --exclude='L2/' --exclude='Admin Messages/' --exclude='derived/' \
   -e "ssh -i /root/.ssh/id_goes -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15" \
   "${goes_ssh_user}@${goes_host}:${goes_output_dir}/" "$ARCHIVE/"
 EOF
@@ -126,6 +126,8 @@ fi
 # the pushed copy.
 cp /tmp/goes_gallery.py /opt/goes-archive/goes_gallery.py
 chmod 0755 /opt/goes-archive/goes_gallery.py
+# US state boundaries for the map overlay (provisioner-managed, always refreshed).
+[ -f /tmp/us_states.geojson ] && cp /tmp/us_states.geojson /opt/goes-archive/us_states.geojson
 
 # Tunables are write-if-absent so on-box calibration (crop box, locality window)
 # survives a re-apply.

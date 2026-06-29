@@ -87,6 +87,7 @@ resource "null_resource" "provision" {
     container_id   = proxmox_virtual_environment_container.goes_archive.vm_id
     provision_hash = sha256(local.provision_script)
     gallery_hash   = filesha256("${path.module}/goes_gallery.py")
+    states_hash    = filesha256("${path.module}/us_states.geojson")
   }
 
   connection {
@@ -111,6 +112,13 @@ resource "null_resource" "provision" {
   provisioner "file" {
     source      = "${path.module}/goes_gallery.py"
     destination = "/tmp/goes_gallery.py"
+  }
+
+  # US state boundaries (low-res GeoJSON) for the rack-side map overlay — SatDump
+  # ships only coastline/country shapefiles, not state lines.
+  provisioner "file" {
+    source      = "${path.module}/us_states.geojson"
+    destination = "/tmp/us_states.geojson"
   }
 
   # Single && chain so a failing script can't be masked by rm -f exiting 0

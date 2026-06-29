@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 try:
     import cbor2
@@ -64,6 +64,11 @@ MESO_MAX_AGE = int(os.environ.get("GOES_MESO_MAX_AGE_SEC", "1800"))
 PUBLIC_BASE = os.environ.get("GOES_PUBLIC_BASE", "").rstrip("/")
 INDEX_TTL = int(os.environ.get("GOES_INDEX_TTL", "30"))
 THUMB_W = int(os.environ.get("GOES_THUMB_W", "360"))
+# Map overlay (drawn rack-side via the GOES projection — SatDump only ships
+# coastline/country shapefiles, not US state lines). On for the headline by default.
+OVERLAY_ON = os.environ.get("GOES_OVERLAY", "1") == "1"
+STATES_GEOJSON = os.environ.get("GOES_STATES_GEOJSON", "/opt/goes-archive/us_states.geojson")
+HOME_LABEL = os.environ.get("GOES_HOME_LABEL", "Cape Girardeau")
 
 # A timestamped capture dir, e.g. "2026-06-29_11-30-21" (UTC, matches the Z files).
 TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$")
@@ -143,6 +148,142 @@ def mesoscale_is_local(capture_dir):
     if not c:
         return False
     return abs(c[0] - HOME_SCAN[0]) <= LOCAL_DX and abs(c[1] - HOME_SCAN[1]) <= LOCAL_DY
+
+
+# ---- map overlay (state lines, cities, home marker) ------------------------
+# Curated regional cities (name, lat, lon); only those landing in-frame are drawn.
+CITIES = [
+    ("St. Louis", 38.63, -90.20), ("Memphis", 35.15, -90.05),
+    ("Nashville", 36.16, -86.78), ("Louisville", 38.25, -85.76),
+    ("Little Rock", 34.74, -92.29), ("Kansas City", 39.10, -94.58),
+    ("Springfield MO", 37.21, -93.29), ("Evansville", 37.97, -87.57),
+    ("Paducah", 37.08, -88.60), ("Indianapolis", 39.77, -86.16),
+    ("Chicago", 41.88, -87.63), ("Tulsa", 36.15, -95.99),
+]
+COL_STATE = (255, 214, 64)      # amber state lines
+COL_CITY = (245, 245, 245)
+COL_HOME = (255, 70, 70)
+_STATES = {"rings": None}
+
+
+def _state_rings():
+    """US state boundary rings as [(lon,lat),...], loaded once from the GeoJSON."""
+    if _STATES["rings"] is None:
+        rings = []
+        try:
+            with open(STATES_GEOJSON) as f:
+                gj = json.load(f)
+            for feat in gj.get("features", []):
+                g = feat.get("geometry") or {}
+                cs = g.get("coordinates") or []
+                polys = cs if g.get("type") == "MultiPolygon" else (
+                    [cs] if g.get("type") == "Polygon" else [])
+                for poly in polys:
+                    for ring in poly:
+                        rings.append([(pt[0], pt[1]) for pt in ring])
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            log(f"states geojson load failed ({STATES_GEOJSON}): {e}")
+            rings = []
+        _STATES["rings"] = rings
+    return _STATES["rings"]
+
+
+def projector(cfg):
+    """f(lat,lon)->(col,row) in the cfg image's pixel grid (None off-disk).
+
+    Inverts SatDump's geos projection_cfg: col=(x*alt-offset_x)/scalar_x (x = scan
+    angle from latlon_to_scan). Validated against Cape's known full-disk pixel.
+    """
+    try:
+        alt = float(cfg["altitude"]); ox = float(cfg["offset_x"]); oy = float(cfg["offset_y"])
+        sx = float(cfg["scalar_x"]); sy = float(cfg["scalar_y"]); lon0 = float(cfg.get("lon0", -75.0))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    def f(lat, lon):
+        s = latlon_to_scan(lat, lon, lon0)
+        if not s:
+            return None
+        return (s[0] * alt - ox) / sx, (s[1] * alt - oy) / sy
+    return f
+
+
+def draw_overlay(img, cfg, ox=0, oy=0, layers=("states", "cities", "home")):
+    """Draw map overlays onto a PIL image. cfg = the SOURCE image's projection_cfg;
+    (ox,oy) = the source-pixel origin if img is a crop of that source (else 0,0)."""
+    proj = projector(cfg)
+    if not proj:
+        return img.convert("RGB")
+    im = img.convert("RGB")
+    d = ImageDraw.Draw(im)
+    W, H = im.size
+    lw = max(1, round(W / 1200))
+    fsize = max(11, round(W / 90))
+    try:
+        font = ImageFont.load_default(size=fsize)
+    except TypeError:                       # older Pillow: fixed-size default only
+        font = ImageFont.load_default()
+
+    def px(lat, lon):
+        p = proj(lat, lon)
+        return (p[0] - ox, p[1] - oy) if p else None
+
+    if "states" in layers:
+        for ring in _state_rings():
+            seg = []
+            for lon, lat in ring:
+                p = px(lat, lon)
+                if p and -W < p[0] < 2 * W and -H < p[1] < 2 * H:
+                    seg.append(p)
+                elif len(seg) > 1:          # break the polyline at off-frame points
+                    d.line(seg, fill=COL_STATE, width=lw); seg = []
+                else:
+                    seg = []
+            if len(seg) > 1:
+                d.line(seg, fill=COL_STATE, width=lw)
+    if "cities" in layers:
+        r = max(2, lw + 1)
+        for name, lat, lon in CITIES:
+            p = px(lat, lon)
+            if not p or not (0 <= p[0] < W and 0 <= p[1] < H):
+                continue
+            x, y = p
+            d.ellipse([x - r, y - r, x + r, y + r], fill=COL_CITY, outline=(0, 0, 0))
+            d.text((x + r + 2, y - fsize // 2), name, fill=COL_CITY, font=font,
+                   stroke_width=1, stroke_fill=(0, 0, 0))
+    if "home" in layers:
+        p = px(HOME_LAT, HOME_LON)
+        if p and 0 <= p[0] < W and 0 <= p[1] < H:
+            x, y = p
+            r = max(5, lw + 4)
+            d.ellipse([x - r, y - r, x + r, y + r], outline=COL_HOME, width=lw + 1)
+            d.line([x - r - 3, y, x + r + 3, y], fill=COL_HOME, width=lw)
+            d.line([x, y - r - 3, x, y + r + 3], fill=COL_HOME, width=lw)
+            d.text((x + r + 4, y - fsize), HOME_LABEL, fill=COL_HOME, font=font,
+                   stroke_width=1, stroke_fill=(0, 0, 0))
+    return im
+
+
+def _ensure_overlay(relpath, layers=("states", "cities", "home")):
+    """Overlay a full archive image (no crop); cache under derived/overlay/.
+    Returns the cached relpath, or None (caller falls back to the raw image)."""
+    src = _safe_path(relpath)
+    if not src:
+        return None
+    cfg = read_projection(os.path.dirname(src))
+    if not cfg:
+        return None
+    out = os.path.join(DERIVED, "overlay", relpath)
+    try:
+        if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(src):
+            return os.path.relpath(out, ARCHIVE)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with Image.open(src) as im:
+            draw_overlay(im, cfg, 0, 0, layers).save(out)
+        return os.path.relpath(out, ARCHIVE)
+    except (OSError, ValueError) as e:
+        log(f"overlay failed {src}: {e}")
+        return None
 
 
 # ---- archive index ---------------------------------------------------------
@@ -233,17 +374,24 @@ def latest_in(sector, caps):
 
 # ---- headline (the weather2 image) -----------------------------------------
 def _ensure_crop(capture, composite):
-    """Crop a Full Disk composite to the Cape box; cache under DERIVED. Returns relpath."""
+    """Crop a Full Disk composite to the Cape box (+ overlay if on); cache under
+    DERIVED. Returns relpath."""
     src = os.path.join(ARCHIVE, capture["dir"], composite)
     out_dir = os.path.join(DERIVED, capture["dir"])
-    out = os.path.join(out_dir, composite.replace(".png", "__cape.png"))
+    suffix = "__cape_ov.png" if OVERLAY_ON else "__cape.png"
+    out = os.path.join(out_dir, composite.replace(".png", suffix))
     rel = os.path.relpath(out, ARCHIVE)
     try:
         if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(src):
             return rel
         os.makedirs(out_dir, exist_ok=True)
         with Image.open(src) as im:
-            im.crop(CROP_BOX).save(out)
+            crop = im.crop(CROP_BOX)
+            if OVERLAY_ON:
+                cfg = read_projection(os.path.join(ARCHIVE, capture["dir"]))
+                if cfg:
+                    crop = draw_overlay(crop, cfg, CROP_BOX[0], CROP_BOX[1])
+            crop.save(out)
         return rel
     except (OSError, ValueError) as e:
         log(f"crop failed {src}: {e}")
@@ -271,6 +419,8 @@ def headline():
         cap_dir = os.path.join(ARCHIVE, m["dir"])
         if mesoscale_is_local(cap_dir) and m["preferred"]:
             rel = os.path.join(m["dir"], m["preferred"])
+            if OVERLAY_ON:
+                rel = _ensure_overlay(rel) or rel    # overlaid mesoscale, else raw
             return {"satellite": SAT, "sector": sector, "source": "mesoscale",
                     "composite": m["preferred"], "timestamp": m["timestamp"],
                     "age_sec": int(now - m["timestamp"]),
@@ -363,7 +513,7 @@ dialog .dh select,dialog .dh button{background:#1a2433;color:var(--text);border:
 <div class="tabs" id="tabs"></div>
 <div class="grid" id="grid"><div class="empty">loading…</div></div>
 </div>
-<dialog id="dlg"><div class="dh"><select id="comp"></select><span class="dim" id="dlgmeta"></span><button id="dlgx">close</button></div><img id="dlgimg" alt=""></dialog>
+<dialog id="dlg"><div class="dh"><select id="comp"></select><label class="dim" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="ovl">overlay</label><span class="dim" id="dlgmeta"></span><button id="dlgx">close</button></div><img id="dlgimg" alt=""></dialog>
 <script>
 var $=function(i){return document.getElementById(i)};var IMG="/api/goes/image/";
 var SECTORS=["Full Disk","Mesoscale 1","Mesoscale 2"];var cur="Full Disk";var CAPS=[];
@@ -385,8 +535,8 @@ function open(id){var c=CAPS.find(function(x){return x.id===id});if(!c)return;
   var opts=c.composites.concat(c.bands);
   $('comp').innerHTML=opts.map(function(o){return '<option value="'+esc(o)+'">'+esc(o.replace('abi_rgb_','').replace(/_/g,' ').replace('.png',''))+'</option>'}).join('');
   $('dlgmeta').textContent=c.sector+' · '+fmt(c.timestamp);
-  function show(){$('dlgimg').src=IMG+encodeURI(c.dir+'/'+$('comp').value)}
-  $('comp').value=c.preferred||opts[0];show();$('comp').onchange=show;$('dlg').showModal();}
+  function show(){$('dlgimg').src=IMG+encodeURI(c.dir+'/'+$('comp').value)+($('ovl').checked?'?overlay=1':'')}
+  $('comp').value=c.preferred||opts[0];show();$('comp').onchange=show;$('ovl').onchange=show;$('dlg').showModal();}
 $('dlgx').onclick=function(){$('dlg').close()};
 function loadCaps(){fetch('/api/goes/captures?recent=240',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){CAPS=d.captures||[];render();}).catch(function(){})}
 function loadSpace(){fetch('/api/goes/space',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){if(d.free_gb!=null)$('space').textContent=d.free_gb+' GB free · '+(d.captures||0)+' captures';}).catch(function(){})}
@@ -453,7 +603,10 @@ class Handler(BaseHTTPRequestHandler):
             t = ensure_thumb(rel)
             self._file(t) if t else self._json(404, {"error": "not found"})
         elif path.startswith("/api/goes/image/"):
-            p = _safe_path(path[len("/api/goes/image/"):])
+            rel = path[len("/api/goes/image/"):]
+            if params.get("overlay") == "1":      # gallery toggle: annotate on demand
+                rel = _ensure_overlay(rel) or rel
+            p = _safe_path(rel)
             self._file(p) if p else self._json(404, {"error": "not found"})
         elif path == "/api/goes/space":
             try:
