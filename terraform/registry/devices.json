@@ -157,6 +157,18 @@
       "freq_hz": 978000000,
       "sample_rate_default": 2083334,
       "usb_controller": "p24"
+    },
+    "davis-vantage": {
+      "_comment": "Davis Vantage weather station console on weather2.srvr (Pi Zero 2 W). NOT an SDR — a serial weather station read over Bluetooth rfcomm (/dev/rfcomm0, console MAC 00:1B:DC:50:05:DE). The Zero is a THIN bridge: ser2net re-serves the console as raw serial-over-TCP (:3001); the rack weather-compute LXC (905/.87) runs weewx 5 (Vantage driver type=ethernet) + Belchertown + uploads + nginx, and serves bobgardner.org. domain:weather keeps it out of the SDR loops. SINGLE-MASTER: only one weewx can read the console, so the pi-weather module has a `cutover` flag (default false = stage the bridge idle while local weewx keeps the console).",
+      "present": true,
+      "host": "weather2.srvr",
+      "console_mac": "00:1B:DC:50:05:DE",
+      "antenna": "n/a",
+      "feed": "Davis Vantage console (Bluetooth SPP)",
+      "role": "weather-station",
+      "domain": "weather",
+      "transport": "ser2net",
+      "port": 3001
     }
   }
 }
