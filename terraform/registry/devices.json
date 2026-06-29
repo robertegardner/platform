@@ -8,9 +8,9 @@
       "feed": "Shakespeare 5120",
       "filter": "FM bandpass",
       "_antenna_ports": {
-        "_comment": "RSPdx-R2 is a single tuner with 3 software-selectable antenna inputs (one band at a time). 'antenna'/'feed'/'filter' above describe the ACTIVE port (A, the FM job). Port B is now EMPTY (the dipole + Sawbird+ NOAA LNA were removed 2026-06-16 for troubleshooting on a separate Pi, taking the interim Meteor/NOAA path with them — no replacement until an RTL v4 is acquired). Port C carries the AM long-wire, consumed by radio-compute's am_stream.py over the remote dx-R2 (the eventual AM home is the HF+, deferred until its YouLoop + the radio-compute AM rewire).",
+        "_comment": "RSPdx-R2 is a single tuner with 3 software-selectable antenna inputs (one band at a time). 'antenna'/'feed'/'filter' above describe the ACTIVE port (A, the FM job). Port B now carries an AM loop -> 9:1 balun (added 2026-06-17, reusing the port the dipole + Sawbird+ NOAA LNA vacated 2026-06-16). Port C still carries the AM long-wire, consumed by radio-compute's am_stream.py over the remote dx-R2. NOTE: dx-R2 is single-tuner/one-band-at-a-time and Antenna A owns it for live FM, so B/C remain physical-readiness only until AM is sampled (on-demand preempt, or moved to the HF+ YouLoop).",
         "Antenna A": "Shakespeare 5120 + FM bandpass (active, fm-multistation)",
-        "Antenna B": "(empty — dipole + Sawbird+ NOAA LNA removed to the attic 2026-06-16)",
+        "Antenna B": "AM loop -> 9:1 balun (AM broadcast, added 2026-06-17)",
         "Antenna C": "long-wire — interim AM broadcast"
       },
       "role": "fm-multistation",
@@ -24,12 +24,12 @@
       "usb_controller": "A"
     },
     "hf-plus": {
-      "_comment": "Airspy HF+ — attached 2026-06-16, served on the Pi (sdr-source@hf-plus :55002, SoapyAirspyHF built by the pi provisioner). Interim antenna is a WHIP until the YouLoop arrives. NOTE: present:true makes the pi-acquisition provisioner lay down its source server, but the radio-compute AM consumer still reads the dx-R2 long-wire (Antenna C) — moving AM onto the HF+ is a deliberate radio-compute follow-up (touches the live FM stream), not yet done.",
+      "_comment": "Airspy HF+ — attached 2026-06-16, served on the Pi (sdr-source@hf-plus :55002, SoapyAirspyHF built by the pi provisioner). YouLoop attached 2026-06-17 (replaced the interim whip). NOTE: the YouLoop is a passive HF/MW magnetic loop — great for the HF+'s am-broadcast role, but it is NOT a VHF antenna, so it likely degrades the NOAA Weather Radio reception (162.550 MHz) that wx-stream.py serves on /wx.mp3 off the whip's ~60 dB. Re-verify /wx.mp3 + the NWR scan after the swap. present:true makes the pi-acquisition provisioner lay down its source server; the radio-compute AM consumer still reads the dx-R2 long-wire (Antenna C) — moving AM onto the HF+ YouLoop is a deliberate radio-compute follow-up (touches the live FM stream), not yet done.",
       "present": true,
       "soapy_args": "driver=airspyhf",
       "antenna": "single",
-      "feed": "whip (interim) / YouLoop (pending)",
-      "filter": "none (whip)",
+      "feed": "YouLoop",
+      "filter": "none (YouLoop)",
       "role": "am-broadcast",
       "domain": "radio",
       "transport": "soapy-remote",
@@ -74,7 +74,7 @@
       "usb_controller": "B"
     },
     "rtl-v4": {
-      "_comment": "NOT acquired yet (2026-06-16). The Meteor/NOAA path it would own is currently DARK — the V-dipole + Sawbird+ NOAA LNA were removed to the attic on 2026-06-16, and the Pi wxsat-scheduler is paused until an RTL v4 + antenna return. Feed/filter below describe the intended setup, not what is plugged in.",
+      "_comment": "ON ORDER (2026-06-19) to REPLACE the flaky nooelec-wx for the Meteor-LRPT role on p24. The Nooelec NESDR proved unreliable (drops off the bus across hosts incl. the attic), so an RTL v4 was ordered as a known-good dongle. When it arrives: put it on p24 with the Meteor V-dipole (+Sawbird), give it the rtl_tcp acquisition role the nooelec-wx entry held (or fold those settings here), flip present:true, re-apply pi_wxsat + radio_compute. Feed/filter below describe the intended setup, not what is plugged in.",
       "present": false,
       "soapy_args": "driver=rtlsdr",
       "antenna": "single",
@@ -88,6 +88,44 @@
       "port": 55004,
       "bias_tee": true,
       "usb_controller": "B"
+    },
+    "nooelec-wx": {
+      "_comment": "SHELVED 2026-06-19 (present:false). Nooelec NESDR SMArt v5 (RTL2838, Meteor V-dipole) on the OUTDOOR ADS-B Pi p24.srvr (192.168.6.141). PAUSED because the NOOELEC DONGLE ITSELF IS FLAKY (per the user: same failures in the attic on a different host — it drops off the bus / -4/-1/-71; an RTL v4 is ON ORDER to replace it). NOT a p24-USB-marginal problem: p24's two ADS-B dongles run for weeks, and this Nooelec failed in every config (3-dongle, solo, blue USB-3). It wedged overnight 2026-06-18/19 (rtl_tcp ConnectionReset -> all captures got no IQ). The afternoon passes that DID record (clean, gain 7.2dB/250k) decoded NOSYNC = reception unresolved. UN-SHELVE when the RTL v4 arrives: swap it in (update serial/device), present:true, terraform apply pi_wxsat + radio_compute, re-enable wxsat-rtltcp (p24) + wxsat-scheduler (.84). User unplugged the Nooelec + re-plugged both ADS-B dongles 2026-06-19; p24 is back to its ADS-B feeder role. The whole acquire->decode->GUI pipeline is proven. See memory wxsat-meteor-on-p24.",
+      "present": false,
+      "host": "p24.srvr",
+      "soapy_args": "driver=rtlsdr",
+      "serial": "22012952",
+      "antenna": "single",
+      "feed": "V-dipole",
+      "filter": "none",
+      "role": "meteor-lrpt",
+      "domain": "wxsat",
+      "transport": "rtl-tcp",
+      "wire_format": "CU8",
+      "endpoint": "tcp://p24.srvr:1234",
+      "port": 1234,
+      "freq_hz": 137900000,
+      "sample_rate_default": 250000,
+      "bias_tee": false,
+      "usb_controller": "p24"
+    },
+    "goes": {
+      "_comment": "GOES-19 HRIT/EMWIN geostationary downlink on goes.srvr (a dedicated Pi 5): Nooelec SmArTee RTL-SDR + Sawbird GOES LNA + dish. UNLIKE every other device, GOES is geostationary/continuous, so SatDump runs `live goes_hrit` ON THE PI (decode does NOT move to the rack). The Pi's goes.service command (gain/freq/samplerate) is hand-tuned and KEPT-IF-ABSENT by the pi-goes provisioner — do not auto-rewrite it from this registry (these values are documentary defaults used only on a fresh install). The rack LXC goes-archive (903/.85) rsync-PULLS goes_output and serves the gallery + goes.rg2.io API + the weather2 headline image. domain:goes keeps it out of the radio-compute device loops.",
+      "present": true,
+      "host": "goes.srvr",
+      "soapy_args": "driver=rtlsdr",
+      "antenna": "single",
+      "feed": "dish + Sawbird GOES LNA",
+      "filter": "Sawbird GOES (LNA)",
+      "role": "goes-hrit",
+      "domain": "goes",
+      "transport": "satdump-live",
+      "wire_format": "CU8",
+      "freq_hz": 1694100000,
+      "sample_rate_default": 2400000,
+      "gain": 40,
+      "bias_tee": true,
+      "usb_controller": "goes"
     }
   }
 }

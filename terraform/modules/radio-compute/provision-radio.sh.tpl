@@ -241,12 +241,18 @@ if [[ "$MODE" == "wbfm" || "$MODE" == "fm" ]]; then
   # stereo_decode entirely (no noisy 38 kHz L-R subcarrier — best for weak/talk).
   # STEREO=1 -> stereo_decode matrix (hardened carrier recovery: EMA amp + crest
   # clamp + ramped honesty gate). --scale 2.0 / --pilot-floor 0.0015 match the MPX
-  # scale + old mono loudness. ffmpeg does per-channel 75us de-emphasis + 15k LP.
+  # scale. BOTH branches end ffmpeg in the same loudnorm=I=-16:TP=-1.5:LRA=11
+  # after 75us de-emphasis + 15k LP, so the mono/stereo UI toggle is loudness-
+  # matched at -16 LUFS / -1.5 dBTP (loudnorm also evens out per-station level).
+  # Why it's needed: post-de-emphasis the audio sits well below 0 dBFS (stereo
+  # matrix measured -30.5 LUFS, ~14 dB low) and nothing else supplies make-up
+  # gain — the old stereo alimiter=level=false applied none ("quiet stereo" bug),
+  # and bare mono had no normalizer at all.
   if [[ "$${STEREO:-1}" == "0" ]]; then
     exec bash -c "python3 /opt/sdr-tuner/wbfm_stream.py | \
       tee >(redsea -r 250000 --output json 2>/dev/null | FREQ='$FREQ' /opt/sdr-tuner/rds_watcher.py) | \
       ffmpeg -hide_banner -loglevel warning -f s16le -ar 250000 -ac 1 -i - \
-             -af 'aemphasis=mode=reproduction:type=75fm,lowpass=15000' \
+             -af 'aemphasis=mode=reproduction:type=75fm,lowpass=15000,loudnorm=I=-16:TP=-1.5:LRA=11' \
              -ar 48000 -ac 1 \
              -c:a libmp3lame -b:a $BITRATE -content_type audio/mpeg \
              -f mp3 '$ICECAST_URL'"
@@ -255,7 +261,7 @@ if [[ "$MODE" == "wbfm" || "$MODE" == "fm" ]]; then
       tee >(redsea -r 250000 --output json 2>/dev/null | FREQ='$FREQ' /opt/sdr-tuner/rds_watcher.py) | \
       python3 /opt/sdr-tuner/stereo_decode.py --in-format s16le --out-format f32le --scale 2.0 --pilot-floor 0.0015 | \
       ffmpeg -hide_banner -loglevel warning -f f32le -ar 250000 -ac 2 -i - \
-             -af 'aemphasis=mode=reproduction:type=75fm,lowpass=15000,alimiter=level=false' \
+             -af 'aemphasis=mode=reproduction:type=75fm,lowpass=15000,loudnorm=I=-16:TP=-1.5:LRA=11' \
              -ar 48000 -ac 2 \
              -c:a libmp3lame -b:a $BITRATE -content_type audio/mpeg \
              -f mp3 '$ICECAST_URL'"
@@ -643,10 +649,19 @@ else
 # wx.rg2.io page + SAME alert decoder. Set HA_WEBHOOK_URL to a Home Assistant
 # webhook (e.g. https://ha.rg2.io/api/webhook/<id>) to announce alerts on house
 # speakers / push. Empty = banner + log only.
+# The webhook JSON includes a 3-tier "tier" field (extreme|severe|advisory) and a
+# "category" (warning|watch|statement|test) so a single HA automation can branch
+# the house response by severity (extreme = whole-house, severe = lesser, advisory
+# = no action). It also carries event_code and, once enriched, nws.severity/
+# urgency/certainty from api.weather.gov.
+# WX_FIPS_FILTER: comma-separated SAME area allowlist (matched on the trailing 5
+# digits). The KPAH transmitter carries the whole tri-state region; this keeps us
+# to Cape Girardeau County, MO (029031). Empty = alert on every county it sends.
 WX_PORT=8090
 WX_DECODE_URL=http://192.168.6.82:8000/wx.mp3
 WX_PUBLIC_URL=https://icecast.rg2.io/wx.mp3
 HA_WEBHOOK_URL=
+WX_FIPS_FILTER=029031
 EOF
   chmod 0640 /etc/radio-compute/wx-alert.env
   chown root:radio /etc/radio-compute/wx-alert.env 2>/dev/null || true
@@ -715,7 +730,10 @@ PYEOF
 cat > /opt/wxsat/wxsat_capture_rack.sh <<'EOF'
 ${wxsat_capture_sh}
 EOF
-chmod +x /opt/wxsat/wxsat_record_rtltcp.py /opt/wxsat/wxsat_scheduler.py /opt/wxsat/wxsat_capture_rack.sh
+cat > /opt/wxsat/wxsat_live.py <<'PYEOF'
+${wxsat_live_py}
+PYEOF
+chmod +x /opt/wxsat/wxsat_record_rtltcp.py /opt/wxsat/wxsat_scheduler.py /opt/wxsat/wxsat_capture_rack.sh /opt/wxsat/wxsat_live.py
 
 # Storage lives on the rack: products + the captures index + the TLE cache.
 install -d -o radio -g radio -m 0755 /var/lib/sdr-streams/wxsat /var/lib/sdr-streams/wxsat/tle

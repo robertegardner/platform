@@ -139,6 +139,38 @@ variable "pi_ssh_user" {
   default     = "rgardner"
 }
 
+# --- Weather-sat acquisition node (outdoor ADS-B Pi, p24) ---------------------
+variable "wxsat_host" {
+  description = "Hostname/IP of the outdoor ADS-B Pi hosting the Nooelec/Meteor dipole. Use the IP since p24.srvr may not resolve from thebeast."
+  type        = string
+  default     = "192.168.6.141"
+}
+
+variable "wxsat_ssh_user" {
+  description = "SSH user on p24 (passwordless sudo for installs/systemctl)"
+  type        = string
+  default     = "rgardner"
+}
+
+# --- GOES acquisition + decode node (dedicated Pi 5, goes.srvr) ---------------
+variable "goes_host" {
+  description = "Hostname/IP of the GOES Pi. Use the IP since goes.srvr may not resolve from thebeast/LXC."
+  type        = string
+  default     = "192.168.6.134"
+}
+
+variable "goes_ssh_user" {
+  description = "SSH user on the GOES Pi (passwordless sudo for installs/systemctl)"
+  type        = string
+  default     = "rgardner"
+}
+
+variable "goes_archive_ip" {
+  description = "Static IP of the goes-archive LXC (vmid_base+3)"
+  type        = string
+  default     = "192.168.6.85"
+}
+
 variable "ssh_private_key_path" {
   description = "Private key thebeast's deploy user uses to reach the Pi"
   type        = string

@@ -4,7 +4,54 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
-## 2026-06-18 (latest) — Unified stack GUI (/dash): coordinator, A/B, ATC presets + recording
+## 2026-06-29 (latest) — GOES-19 HRIT gallery + weather2 headline (goes.rg2.io)
+
+**State: a dedicated GOES Pi (`goes.srvr` = 192.168.6.134, Pi 5; Nooelec SmArTee +
+Sawbird GOES + dish) decodes GOES-19 HRIT live with SatDump. NEW `pi-goes` module
+(keep-if-absent `goes.service` + 24h SD prune) + NEW `goes-archive` LXC (vmid 903 /
+.85, 64 GB) that rsync-pulls products (no --delete), keeps 7 days, and serves a
+browsable gallery + `/api/goes/*`. LIVE.**
+
+- **Headline** (`/api/goes/latest`, the weather2 image) = newest Full Disk **cropped to
+  a Cape-Girardeau box** (Clean Longwave IR, 24/7), falling back to a Mesoscale sector
+  when one is fresh + local (scan-angle vs Cape from the sector's `projection_cfg`).
+- **Map overlay drawn rack-side** (SatDump ships only coastline/country): US state lines
+  (vendored `us_states.geojson`) + regional cities + a Cape marker, projected via the
+  GOES geos transform. Headline overlaid by default; gallery viewer has an `?overlay=1`
+  toggle. Crop tightened to `1878,758,2321,1000`.
+- NPM `goes.rg2.io` → .85:8095 (cert 73). `tools/goes-embed.html` = the weather2 widget
+  (still to be dropped into the Belchertown skin). Details: [[goes-archive-integration]].
+
+## 2026-06-22 — NOAA wx page embedded into weewx/Belchertown (weather.bobgardner.org)
+
+**State: the NOAA Weather Radio player + SAME/EAS alert are now on the public
+weewx station page. Widget source-of-truth = `tools/wx-embed.html` (committed
+52aa519); deployed on `weather2.srvr` (192.168.6.32) at
+`/etc/weewx/skins/Belchertown/index_hook_after_station_info.inc`. weather2 has no
+git repo — that copy is hand-deployed (+ weather2-only webcam imgs). Reference:
+[[weather2-weewx-belchertown-wx-widget]] memory.**
+
+- **Redesign:** alert banner → a **fixed full-width top bar** injected to `<body>`,
+  shown only during an active alert (pulses on priority, area + expiry + NWS link).
+  Player rebuilt **minimal** — round play/pause button, "NOAA Weather Radio",
+  live/monitoring status dot; light theme + `body.dark` override (drops old dark
+  card). User confirmed top bar via a `POST /api/test` (RWT, ~30 s window).
+- **Two weewx/Cheetah gotchas (cost real time):** (1) the `.inc` is Cheetah-parsed
+  on `#include` → JS `$()` read as a template var → `cannot find 'i'`, the whole
+  `index.html.tmpl` render aborts and weewx silently serves the LAST good page
+  (looked "frozen" for days; only `index.html` was failing). FIX = change the
+  template include to **`#include raw "..."`**. (2) weewx **caches the compiled
+  template by the `.tmpl` mtime** + bakes the `#include` in at compile time —
+  editing only the `.inc` does nothing until you `touch index.html.tmpl` +
+  `sudo weectl report run`. `#raw…#end raw` in-file did NOT work (Cheetah 3.3.1
+  rejected `#end raw`). After a Belchertown skin upgrade, re-apply `#include raw`.
+- **Builds on** the 2026-06-21 `wx_alert.py` county filter (`WX_FIPS_FILTER`
+  029031 Cape locked + toggleable neighbors) + live `api.weather.gov` warning text
+  (commit 71004af) — the alerts the embedded bar now surfaces.
+- Headless chromium screenshots of weather2 do NOT work from codeserver (every run
+  fails to write a file); verify via `curl http://192.168.6.32/`.
+
+## 2026-06-18 — Unified stack GUI (/dash): coordinator, A/B, ATC presets + recording
 
 **State: `radio.rg2.io/dash` is now the whole-stack control surface. Built across
 radio (`unified-gui`), scanner (`r2-mode-coordinator`), platform
