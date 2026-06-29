@@ -1,15 +1,20 @@
-# adsb-feeder — sdr-enthusiasts ultrafeeder (the ADS-B hub). One container =
-# readsb (aggregator) + tar1090 + FlightAware/FR24/ADSBx feeders + MLAT. All
-# runtime config (receiver location, ingest, feeder secrets) rides in
-# /etc/adsb-feeder/feeders.env (keep-if-absent, never committed). No USB — it
-# ingests p24's decoded Beast/UAT over the network.
+# adsb-feeder — the ADS-B hub: a 3-container sdr-enthusiasts stack.
+#   ultrafeeder : readsb (aggregator) + tar1090 + MLAT + ADSB-Exchange (native,
+#                 via ULTRAFEEDER_CONFIG). Ingests p24's 1090 Beast + 978 UAT.
+#   piaware     : FlightAware feeder (proprietary → its own container), reads
+#                 ultrafeeder's Beast, pushes MLAT results back.
+#   fr24        : FlightRadar24 feeder (proprietary), reads ultrafeeder's Beast
+#                 for 1090 + p24's dump978 raw for UAT (dual sharing keys).
+# All secrets + receiver location ride in /etc/adsb-feeder/feeders.env (keep-if-
+# absent, never committed). No USB — network ingest only. The sidecars reach the
+# aggregator by the compose service name `ultrafeeder`.
 services:
   ultrafeeder:
     image: ghcr.io/sdr-enthusiasts/docker-adsb-ultrafeeder:latest
     container_name: ultrafeeder
     hostname: adsb-feeder
     restart: unless-stopped
-    env_file: /etc/adsb-feeder/feeders.env
+    env_file: /etc/adsb-feeder/feeders.env   # READSB_LAT/LON/ALT, ULTRAFEEDER_CONFIG (p24 ingest + ADSBx)
     ports:
       - 8080:80        # tar1090 map (NPM: adsb.rg2.io)
       - 30005:30005    # Beast out — local consumers
@@ -24,3 +29,38 @@ services:
     volumes:
       - /opt/adsb-feeder/globe_history:/var/globe_history
       - /opt/adsb-feeder/collectd:/var/lib/collectd
+
+  piaware:
+    image: ghcr.io/sdr-enthusiasts/docker-piaware:latest
+    container_name: piaware
+    restart: unless-stopped
+    env_file: /etc/adsb-feeder/feeders.env   # FEEDER_ID
+    environment:
+      - TZ=America/Chicago
+      - RECEIVER_TYPE=relay
+      - BEASTHOST=ultrafeeder
+      - BEASTPORT=30005
+      - MLAT_RESULTS=yes
+      - MLAT_RESULTS_BEASTHOST=ultrafeeder
+      - MLAT_RESULTS_BEASTPORT=31004
+    tmpfs:
+      - /run:exec,size=64M
+      - /var/log
+    depends_on:
+      - ultrafeeder
+
+  fr24:
+    image: ghcr.io/sdr-enthusiasts/docker-flightradar24:latest
+    container_name: fr24feed
+    restart: unless-stopped
+    env_file: /etc/adsb-feeder/feeders.env   # FR24KEY, FR24_SHARING_KEY_UAT, UATHOST, UATPORT
+    environment:
+      - TZ=America/Chicago
+      - BEASTHOST=ultrafeeder
+      - BEASTPORT=30005
+      - MLAT=no
+    tmpfs:
+      - /run:exec,size=64M
+      - /var/log
+    depends_on:
+      - ultrafeeder

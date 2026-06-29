@@ -13,11 +13,15 @@ P24="${p24_host}"
 echo "==> adsb-feeder provisioning on $(hostname) — ultrafeeder hub, ingest p24=$${P24}"
 
 # --- 1) Docker (+ compose plugin) -------------------------------------------
+# Install via apt (the Ubuntu LXC template ships no curl, so get.docker.com is
+# out). docker.io + docker-compose-v2 give dockerd + the `docker compose` plugin,
+# and run fine in this unprivileged LXC (overlayfs + cgroup v2, nesting on).
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   echo "    docker + compose present"
 else
-  echo "    installing docker (get.docker.com)"
-  curl -fsSL https://get.docker.com | sh >/dev/null 2>&1 || echo "    WARN: docker install failed"
+  echo "    installing docker.io + docker-compose-v2 (apt)"
+  apt-get update -qq
+  apt-get install -y docker.io docker-compose-v2 >/dev/null 2>&1 || echo "    WARN: docker install failed"
   systemctl enable docker >/dev/null 2>&1 || true
   systemctl start docker || true
 fi
@@ -44,22 +48,22 @@ else
 READSB_LAT=__LAT__
 READSB_LON=__LON__
 READSB_ALT=__ALT__
+# Global UUID — REQUIRED for ultrafeeder's mlat-client (it checks a global UUID/
+# MLAT_USER at startup and disables MLAT before reading the per-line uuid=).
+UUID=__ADSBX_UUID__
 #
-# Ingest p24's decoded streams (1090 Beast + 978 raw):
-ULTRAFEEDER_CONFIG=adsb,${p24_host},30005,beast_in;uat_in,${p24_host},30978
+# ultrafeeder: ingest p24 (1090 Beast + 978 UAT) + feed ADSB-Exchange (native).
+ULTRAFEEDER_CONFIG=adsb,${p24_host},30005,beast_in;adsb,${p24_host},30978,uat_in;adsb,feed1.adsbexchange.com,30004,beast_reduce_plus_out,uuid=__ADSBX_UUID__;mlat,feed.adsbexchange.com,31090,uuid=__ADSBX_UUID__
 READSB_NET_CONNECTOR_DELAY=15
 #
-# --- FlightAware ---
-ULTRAFEEDER_CONFIG_FLIGHTAWARE=true
-FLIGHTAWARE_FEEDER_ID=__FEEDER_ID__
+# --- FlightAware (piaware sidecar) ---
+FEEDER_ID=__FEEDER_ID__
 #
-# --- FlightRadar24 ---
-ULTRAFEEDER_CONFIG_FR24=true
-FR24_SHARING_KEY=__FR24_KEY__
-#
-# --- ADSB-Exchange ---
-ADSBEXCHANGE_UUID=__ADSBX_UUID__
-MLAT_USER=__ADSBX_SITENAME__
+# --- FlightRadar24 (fr24 sidecar) — dual keys: 1090 + UAT direct from p24 ---
+FR24KEY=__FR24_KEY__
+FR24_SHARING_KEY_UAT=__FR24_KEY_UAT__
+UATHOST=${p24_host}
+UATPORT=30978
 EOF
   chmod 0600 /etc/adsb-feeder/feeders.env
   echo "    wrote feeders.env TEMPLATE — FILL THE SECRETS before the stack will feed"
