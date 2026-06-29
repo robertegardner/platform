@@ -43,6 +43,10 @@ else
   echo "    installing readsb (wiedehopf script)"
   bash -c "$(wget -nv -O - https://github.com/wiedehopf/adsb-scripts/raw/master/readsb-install.sh)" >/dev/null 2>&1 \
     || echo "    WARN: readsb install failed"
+  # The installer may auto-start readsb with a default config that grabs the
+  # wrong SDR (p24 index 0 = the 978 dongle). Stop it until we configure the
+  # serial below, so dump978-fa keeps its dongle.
+  systemctl stop readsb 2>/dev/null || true
 fi
 
 # --- 3) readsb config — 1090ES on SERIAL_1090, Beast/SBS/raw on the LAN -------
