@@ -21,6 +21,10 @@ locals {
   # live (SatDump goes_hrit) — its own domain so it stays out of the radio loops.
   # The rack LXC goes-archive pulls the products and serves the gallery + weather2.
   goes_devices = { for id, d in local.present_devices : id => d if d.domain == "goes" }
+  # ADS-B lives on the standalone outdoor Pi (p24) that DECODES both bands
+  # (readsb 1090 + dump978-fa 978) and ships Beast to the rack adsb-feeder LXC,
+  # which runs ultrafeeder (the hub) — its own domain, out of the other loops.
+  adsb_devices = { for id, d in local.present_devices : id => d if d.domain == "adsb" }
 }
 
 # Tier 1 — Acquisition (Pi, bare metal). NO container resource.
@@ -155,3 +159,36 @@ module "goes_archive" {
   goes_host     = var.goes_host
   goes_ssh_user = var.goes_ssh_user
 }
+
+# Tier 3 (extra) — adsb-feeder LXC: the ultrafeeder ADS-B hub. Ingests p24's
+# Beast/UAT, runs tar1090 (adsb.rg2.io), fans out to FA/FR24/ADSBx + MLAT, and
+# re-serves Beast/SBS for local consumers. No depends_on pi_adsb (runtime).
+module "adsb_feeder" {
+  source = "./modules/adsb-feeder"
+
+  vmid                 = var.vmid_base + 4
+  ip                   = var.adsb_feeder_ip
+  prefix               = var.prefix
+  gw                   = var.gw_server
+  vlan_id              = var.vlan_server
+  node                 = var.pm_node
+  storage              = var.lxc_storage
+  template             = var.lxc_template
+  bridge               = var.pve_bridge
+  ssh_public_key       = var.ssh_public_key
+  ssh_private_key_path = var.ssh_private_key_path
+
+  p24_host = var.adsb_host
+}
+
+# Tier 1 (extra) — pi-adsb: p24 decode-only (readsb 1090 + dump978-fa 978),
+# Beast/SBS to the rack. WIRED IN PHASE 3 (the module files land in Task 5);
+# uncomment then so `terraform validate` stays green until the module exists.
+# module "pi_adsb" {
+#   source = "./modules/pi-adsb"
+#
+#   adsb_host            = var.adsb_host
+#   ssh_user             = var.adsb_ssh_user
+#   ssh_private_key_path = var.ssh_private_key_path
+#   devices              = local.adsb_devices
+# }

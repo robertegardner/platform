@@ -1,0 +1,26 @@
+# adsb-feeder — sdr-enthusiasts ultrafeeder (the ADS-B hub). One container =
+# readsb (aggregator) + tar1090 + FlightAware/FR24/ADSBx feeders + MLAT. All
+# runtime config (receiver location, ingest, feeder secrets) rides in
+# /etc/adsb-feeder/feeders.env (keep-if-absent, never committed). No USB — it
+# ingests p24's decoded Beast/UAT over the network.
+services:
+  ultrafeeder:
+    image: ghcr.io/sdr-enthusiasts/docker-adsb-ultrafeeder:latest
+    container_name: ultrafeeder
+    hostname: adsb-feeder
+    restart: unless-stopped
+    env_file: /etc/adsb-feeder/feeders.env
+    ports:
+      - 8080:80        # tar1090 map (NPM: adsb.rg2.io)
+      - 30005:30005    # Beast out — local consumers
+      - 30003:30003    # SBS/BaseStation out — scoreboard LED matrix
+    environment:
+      - TZ=America/Chicago
+      - READSB_NET_ENABLE=true
+      - UPDATE_TAR1090=true
+    tmpfs:
+      - /run:exec,size=256M
+      - /var/log
+    volumes:
+      - /opt/adsb-feeder/globe_history:/var/globe_history
+      - /opt/adsb-feeder/collectd:/var/lib/collectd

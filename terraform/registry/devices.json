@@ -126,6 +126,37 @@
       "gain": 40,
       "bias_tee": true,
       "usb_controller": "goes"
+    },
+    "adsb-1090": {
+      "_comment": "1090ES ADS-B on p24.srvr (RTL2832U serial 00001090). p24 DECODES with readsb and serves Beast/SBS on the LAN; the rack adsb-feeder LXC (904/.86) runs ultrafeeder which ingests + aggregates + feeds FA/FR24/ADSBx + MLAT + tar1090 (adsb.rg2.io). domain:adsb keeps it out of the other compute loops. SELECT BY SERIAL, never index — on p24 the enumeration order is REVERSED (index 0 = the 978 dongle).",
+      "present": true,
+      "host": "p24.srvr",
+      "soapy_args": "driver=rtlsdr",
+      "serial": "00001090",
+      "antenna": "1090 vertical",
+      "role": "adsb-1090es",
+      "domain": "adsb",
+      "transport": "beast",
+      "wire_format": "CS8",
+      "freq_hz": 1090000000,
+      "sample_rate_default": 2400000,
+      "gain": "auto",
+      "usb_controller": "p24"
+    },
+    "adsb-978": {
+      "_comment": "978 UAT ADS-B on p24.srvr (RTL2838 serial 00000001) via dump978-fa (kept as-is). raw out :30978; the rack ultrafeeder ingests it as uat_in. Same p24->rack hub flow as adsb-1090.",
+      "present": true,
+      "host": "p24.srvr",
+      "soapy_args": "driver=rtlsdr",
+      "serial": "00000001",
+      "antenna": "978 vertical",
+      "role": "adsb-978uat",
+      "domain": "adsb",
+      "transport": "raw978",
+      "wire_format": "CS8",
+      "freq_hz": 978000000,
+      "sample_rate_default": 2083334,
+      "usb_controller": "p24"
     }
   }
 }
