@@ -141,7 +141,8 @@ GOES_PUBLIC_BASE=${public_base}
 # 24/7 headline: Clean Longwave IR carries cloud structure day AND night.
 GOES_PREFERRED_COMPOSITE=abi_rgb_Clean_Longwave_IR_Window_Band
 # Cape-Girardeau crop of the 5424x5424 full disk (left,top,right,bottom px).
-GOES_CROP_BOX=1688,660,2480,1144
+# Tightened regional view (~lat 34.3-40.3, lon -94.3..-84.7) centred on Cape.
+GOES_CROP_BOX=1878,758,2321,1000
 GOES_HOME_LAT=37.30
 GOES_HOME_LON=-89.52
 # How close (scan-angle radians dx,dy) a mesoscale centre must be to home to win

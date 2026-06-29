@@ -55,7 +55,7 @@ DERIVED = os.environ.get("GOES_DERIVED_DIR", os.path.join(ARCHIVE, "derived"))
 PREFERRED = os.environ.get("GOES_PREFERRED_COMPOSITE",
                            "abi_rgb_Clean_Longwave_IR_Window_Band")
 CROP_BOX = tuple(int(x) for x in
-                 os.environ.get("GOES_CROP_BOX", "1688,660,2480,1144").split(","))
+                 os.environ.get("GOES_CROP_BOX", "1878,758,2321,1000").split(","))
 HOME_LAT = float(os.environ.get("GOES_HOME_LAT", "37.30"))
 HOME_LON = float(os.environ.get("GOES_HOME_LON", "-89.52"))
 _win = os.environ.get("GOES_LOCAL_SCAN_WINDOW", "0.020,0.020").split(",")
