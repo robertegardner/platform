@@ -332,6 +332,20 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   the JS `$()` → "cannot find 'i'", report aborts), and weewx caches the compiled
   template by the parent `.tmpl` mtime, so after editing `touch` the `.tmpl` +
   `weectl report run`. Details: [[weather2-weewx-belchertown-wx-widget]] memory.)
+- `goes.rg2.io` → **192.168.6.85:8095** (`goes-gallery.service` on the NEW
+  **goes-archive** LXC — vmid 903, `modules/goes-archive`). Browsable GOES-19 HRIT
+  gallery + `/api/goes/{latest,captures,image,space}`. The Pi `goes.srvr`
+  (192.168.6.134, dedicated Pi 5) DECODES live (SatDump `goes_hrit`; GOES is
+  geostationary so decode stays on the Pi — `modules/pi-goes`, goes.service
+  keep-if-absent + 24h SD prune); the LXC rsync-PULLS the products (no --delete),
+  keeps 7 days, and serves them. **`/api/goes/latest` is the weather2 headline** =
+  Full Disk **cropped to a Cape box** (Clean Longwave IR, 24/7), falling back to a
+  Mesoscale sector when one is fresh + local (scan-angle vs Cape from the sector's
+  `projection_cfg`; needs cbor2). NPM host id 60 (built via the API — NPMplus
+  rejects `access_list_id` on POST/PUT, so don't clone it in; cert 73 issued +
+  attached, ssl_forced). `tools/goes-embed.html` is the weather2 widget (same
+  `#include raw` + touch-.tmpl gotcha as wx). Details:
+  [[goes-archive-integration]] memory.)
 - `ems.rg2.io` now serves the **V1-style amber-LCD tuner** at `/` (NFM/AM presets
   NOAA WX/Marine/EMS/KCGI-Tower-125.525/Memphis-Center, squelch, direct tune) →
   `/api/monitor/{tune,stop}` → `monitor.service` (NFM/AM on the R2, **preempts
