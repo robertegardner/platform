@@ -56,7 +56,7 @@ cat > /usr/local/sbin/goes-pull.sh <<EOF
 # platform-managed (goes-archive): incremental, non-destructive pull.
 set -uo pipefail
 exec rsync -az --timeout=120 \
-  --exclude='L2/' --exclude='Admin Messages/' --exclude='derived/' \
+  --exclude='Admin Messages/' --exclude='derived/' \
   -e "ssh -i /root/.ssh/id_goes -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15" \
   "${goes_ssh_user}@${goes_host}:${goes_output_dir}/" "$ARCHIVE/"
 EOF

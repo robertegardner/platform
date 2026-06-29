@@ -307,59 +307,93 @@ def _dir_unix(name):
         return None
 
 
-def _scan_archive():
-    """Walk IMAGES/<sat>/<sector>/<ts>/ -> sorted capture records (newest first).
+def _product_label(name):
+    """L2 product filename -> human label, e.g.
+    'abi_rgb_AWG_Cloud_Height_Algorithm_(ACHA).png' -> 'AWG Cloud Height Algorithm (ACHA)'."""
+    n = (name or "").rsplit("/", 1)[-1]
+    for suf in ("_map.png", ".png"):
+        if n.endswith(suf):
+            n = n[: -len(suf)]
+    if n.startswith("abi_rgb_"):
+        n = n[len("abi_rgb_"):]
+    return n.replace("_", " ").strip() or "product"
 
-    Cheap and OSError-tolerant: an in-flight rsync may be writing a capture dir,
-    so a dir that vanishes or has no PNGs yet is just skipped this pass.
-    """
+
+def _group_for(kind, sat, sector, preferred):
+    """The browse-tab label for a capture. GOES-19 imagery keeps its plain sector
+    names (the primary feed); other satellites and L2 products are prefixed so they
+    sort into their own tabs."""
+    if kind == "L2":
+        return "L2 · " + _product_label(preferred)
+    if sat == "GOES-19":
+        return sector
+    if sat in ("NWS", "Unknown"):
+        return sat
+    return f"{sat} · {sector}"
+
+
+def _scan_archive():
+    """Walk IMAGES/<sat>/<sector>/<ts>/ AND L2/<sat>/<sector>/<ts>/ -> capture
+    records (newest first). Multi-satellite (GOES-19 East, GOES-18 West rebroadcast,
+    NWS, Unknown) + L2 derived products. OSError-tolerant (in-flight rsync)."""
     caps = []
-    try:
-        sectors = [e for e in os.scandir(IMAGES_ROOT) if e.is_dir()]
-    except OSError:
-        return []
-    for sec in sectors:
+    for kind in ("IMAGES", "L2"):
+        base = os.path.join(ARCHIVE, kind)
         try:
-            tsdirs = [e for e in os.scandir(sec.path) if e.is_dir() and TS_RE.match(e.name)]
+            sats = [e for e in os.scandir(base) if e.is_dir()]
         except OSError:
             continue
-        for td in tsdirs:
-            ts = _dir_unix(td.name)
-            if ts is None:
-                continue
+        for sat in sats:
             try:
-                pngs = [e.name for e in os.scandir(td.path)
-                        if e.is_file() and e.name.endswith(".png")
-                        and not e.name.endswith("_map.png")]
+                sectors = [e for e in os.scandir(sat.path) if e.is_dir()]
             except OSError:
                 continue
-            if not pngs:
-                continue
-            composites = sorted(n for n in pngs if n.startswith("abi_rgb_"))
-            bands = sorted(n for n in pngs if not n.startswith("abi_rgb_"))
-            rel = os.path.relpath(td.path, ARCHIVE)
-            caps.append({
-                "id": f"{sec.name}/{td.name}".replace(" ", "_"),
-                "satellite": SAT,
-                "sector": sec.name,
-                "timestamp": ts,
-                "dir": rel,                       # relpath under ARCHIVE
-                "composites": composites,
-                "bands": bands,
-                "preferred": (PREFERRED + ".png") if (PREFERRED + ".png") in pngs
-                else (composites[0] if composites else (bands[0] if bands else None)),
-            })
+            for sec in sectors:
+                try:
+                    tsdirs = [e for e in os.scandir(sec.path) if e.is_dir() and TS_RE.match(e.name)]
+                except OSError:
+                    continue
+                for td in tsdirs:
+                    ts = _dir_unix(td.name)
+                    if ts is None:
+                        continue
+                    try:
+                        pngs = [e.name for e in os.scandir(td.path)
+                                if e.is_file() and e.name.endswith(".png")
+                                and not e.name.endswith("_map.png")]
+                    except OSError:
+                        continue
+                    if not pngs:
+                        continue
+                    composites = sorted(n for n in pngs if n.startswith("abi_rgb_"))
+                    bands = sorted(n for n in pngs if not n.startswith("abi_rgb_"))
+                    pref = ((PREFERRED + ".png") if (PREFERRED + ".png") in pngs
+                            else (composites[0] if composites else bands[0]))
+                    caps.append({
+                        "id": f"{kind}/{sat.name}/{sec.name}/{td.name}".replace(" ", "_"),
+                        "kind": kind,
+                        "satellite": sat.name,
+                        "sector": sec.name,
+                        "group": _group_for(kind, sat.name, sec.name, pref),
+                        "timestamp": ts,
+                        "dir": os.path.relpath(td.path, ARCHIVE),
+                        "composites": composites,
+                        "bands": bands,
+                        "preferred": pref,
+                    })
     caps.sort(key=lambda c: c["timestamp"], reverse=True)
     return caps
 
 
 def get_index(force=False):
-    """Cached archive index; rescans on TTL expiry or when IMAGES mtime changed."""
+    """Cached archive index; rescans on TTL expiry or when IMAGES/L2 mtime changed."""
     now = time.time()
-    try:
-        src_mtime = os.stat(IMAGES_ROOT).st_mtime
-    except OSError:
-        src_mtime = -1.0
+    src_mtime = 0.0
+    for k in ("IMAGES", "L2"):
+        try:
+            src_mtime += os.stat(os.path.join(ARCHIVE, k)).st_mtime
+        except OSError:
+            pass
     with _ILOCK:
         fresh = (now - _INDEX["scanned"] < INDEX_TTL) and _INDEX["src_mtime"] == src_mtime
         if fresh and not force:
@@ -372,9 +406,9 @@ def get_index(force=False):
         return caps
 
 
-def latest_in(sector, caps):
+def latest_in(sector, caps, sat="GOES-19"):
     for c in caps:                                # caps already newest-first
-        if c["sector"] == sector:
+        if c["sector"] == sector and c["satellite"] == sat:
             return c
     return None
 
@@ -516,6 +550,76 @@ def _safe_path(relpath):
     return None
 
 
+# ---- EMWIN (NWS text bulletins + weather graphics off the HRIT feed) --------
+EMWIN_DIR = os.path.join(ARCHIVE, "EMWIN")
+# A_<TTAAII(6)><CCCC(4)><DDHHMM(6)>_C_KWIN_<YYYYMMDDHHMMSS>_<seq>-<n>-<NAME>.<ext>
+EMWIN_RE = re.compile(r"^A_(\w{2})\w{4}(\w{4})\d{6}_C_KWIN_\d{14}_.*-(.+)\.(\w+)$")
+_TT_CAT = {  # WMO T1T2 -> broad category (for the filter chips)
+    "FP": "Forecast", "FA": "Aviation", "FT": "Aviation", "FB": "Aviation",
+    "FZ": "Marine", "FE": "Marine", "FQ": "Marine", "FW": "Fire Wx", "FO": "Forecast",
+    "WW": "Watch/Warn", "WS": "Winter", "WF": "Warning", "WO": "Warning",
+    "WU": "Warning", "WC": "Warning", "WH": "Hurricane", "WT": "Tropical", "WA": "Aviation",
+    "SR": "Hydro", "SU": "Hydro", "SA": "Surface Obs", "SM": "Synoptic",
+    "SP": "Special", "SX": "Obs", "SO": "Obs", "SS": "Marine Obs", "SI": "Obs",
+    "NO": "Notice", "NP": "Notice", "NW": "Notice", "NT": "Test", "NX": "Notice",
+    "AS": "Summary", "AC": "Convective", "AX": "Analysis", "AW": "Analysis", "AE": "Analysis",
+    "TI": "Satellite", "TX": "Misc", "CD": "Climate", "CS": "Climate",
+}
+_CAT_FALLBACK = {"F": "Forecast", "W": "Warning", "S": "Obs", "N": "Notice",
+                 "A": "Analysis", "U": "Upper Air", "T": "Misc", "C": "Climate"}
+_EMWIN = {"items": [], "scanned": 0.0, "mtime": -1.0}
+_ELOCK = threading.Lock()
+
+
+def _emwin_cat(tt):
+    return _TT_CAT.get(tt) or _CAT_FALLBACK.get(tt[:1], "Other")
+
+
+def _emwin_scan():
+    items = []
+    try:
+        ents = list(os.scandir(EMWIN_DIR))
+    except OSError:
+        return []
+    for e in ents:
+        if not e.is_file():
+            continue
+        try:
+            mt = int(e.stat().st_mtime)
+        except OSError:
+            continue
+        ext = e.name.rsplit(".", 1)[-1].lower()
+        typ = "text" if ext == "txt" else "graphic"
+        m = EMWIN_RE.match(e.name)
+        if m:
+            tt, cccc, name, _ = m.groups()
+            items.append({"file": e.name, "office": cccc, "cat": _emwin_cat(tt),
+                          "name": name, "type": typ, "ts": mt})
+        else:
+            items.append({"file": e.name, "office": "", "cat": "Other",
+                          "name": e.name, "type": typ, "ts": mt})
+    items.sort(key=lambda x: x["ts"], reverse=True)
+    return items
+
+
+def emwin_index():
+    """Cached EMWIN product list (newest first); rescans on TTL or dir change."""
+    now = time.time()
+    try:
+        mtime = os.stat(EMWIN_DIR).st_mtime
+    except OSError:
+        mtime = -1.0
+    with _ELOCK:
+        if (now - _EMWIN["scanned"] < INDEX_TTL) and _EMWIN["mtime"] == mtime:
+            return _EMWIN["items"]
+    items = _emwin_scan()
+    with _ELOCK:
+        _EMWIN["items"] = items
+        _EMWIN["scanned"] = now
+        _EMWIN["mtime"] = mtime
+        return items
+
+
 # ---- HTTP ------------------------------------------------------------------
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -545,7 +649,7 @@ dialog img{display:block;max-width:94vw;max-height:84vh;width:auto;height:auto}
 dialog .dh{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.6rem 1rem;border-bottom:1px solid var(--line)}
 dialog .dh select,dialog .dh button{background:#1a2433;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:.35rem .6rem;font:inherit;font-size:.82rem;cursor:pointer}
 </style></head><body>
-<header><h1>🛰 GOES-19 HRIT</h1><span class="dim" id="sub">live archive · Cape Girardeau</span><span class="dim" id="space" style="margin-left:auto"></span></header>
+<header><h1>🛰 GOES-19 HRIT</h1><span class="dim" id="sub">live archive · Cape Girardeau</span><a href="/emwin" style="margin-left:auto;color:var(--accent);text-decoration:none;font-size:.9rem">📰 EMWIN ▸</a><span class="dim" id="space" style="margin-left:1rem"></span></header>
 <div class="wrap">
 <div class="hero"><img id="hero" alt="latest local image"><div class="cap"><span id="herometa">loading…</span><span class="dim">headline · auto local</span></div></div>
 <div class="tabs" id="tabs"></div>
@@ -554,7 +658,7 @@ dialog .dh select,dialog .dh button{background:#1a2433;color:var(--text);border:
 <dialog id="dlg"><div class="dh"><select id="comp"></select><label class="dim" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="ovl">overlay</label><a class="dim" id="full" target="_blank" rel="noopener" style="text-decoration:underline">full res &#8595;</a><span class="dim" id="dlgmeta"></span><button id="dlgx">close</button></div><img id="dlgimg" alt=""></dialog>
 <script>
 var $=function(i){return document.getElementById(i)};var IMG="/api/goes/image/";
-var SECTORS=["Full Disk","Mesoscale 1","Mesoscale 2"];var cur="Full Disk";var CAPS=[];
+var GROUPS=[];var cur=null;var CAPS=[];
 function esc(s){return String(s).replace(/[&<>"]/g,function(m){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]})}
 function fmt(t){return t?new Date(t*1000).toLocaleString():''}
 function ago(s){if(s<90)return s+'s ago';if(s<5400)return Math.round(s/60)+'m ago';return Math.round(s/3600)+'h ago'}
@@ -563,12 +667,12 @@ function loadHero(){fetch('/api/goes/latest',{cache:'no-store'}).then(function(r
   $('hero').src=d.image_url+(d.image_url.indexOf('?')<0?'?t='+d.timestamp:'');
   $('herometa').innerHTML=esc(d.sector)+' · '+esc((d.source||'').replace('-',' '))+' · '+fmt(d.timestamp)+' ('+ago(d.age_sec||0)+')';
 }).catch(function(){})}
-function tabs(){$('tabs').innerHTML=SECTORS.map(function(s){return '<button class="tab'+(s===cur?' on':'')+'" data-s="'+esc(s)+'">'+esc(s)+'</button>'}).join('');
-  Array.prototype.forEach.call($('tabs').children,function(b){b.onclick=function(){cur=b.getAttribute('data-s');tabs();render();}});}
-function render(){var cs=CAPS.filter(function(c){return c.sector===cur});
+function tabs(){$('tabs').innerHTML=GROUPS.map(function(g){return '<button class="tab'+(g.group===cur?' on':'')+'" data-s="'+esc(g.group)+'">'+esc(g.group)+' <small style="opacity:.6">'+g.count+'</small></button>'}).join('');
+  Array.prototype.forEach.call($('tabs').children,function(b){b.onclick=function(){cur=b.getAttribute('data-s');tabs();loadCaps();}});}
+function render(){var cs=CAPS;
   $('grid').innerHTML=cs.length?cs.map(function(c){var t=c.preferred?(IMG+'thumb/'+encodeURI(c.dir+'/'+c.preferred)):'';
-    return '<div class="card" data-id="'+esc(c.id)+'"><img loading="lazy" src="'+t+'"><div class="m"><b>'+fmt(c.timestamp)+'</b>'+c.composites.length+' composite(s) · '+c.bands.length+' band(s)</div></div>'}).join(''):'<div class="empty">no captures in this sector yet</div>';
-  Array.prototype.forEach.call($('grid').children,function(el){el.onclick&&(el.onclick=null);el.addEventListener('click',function(){open(el.getAttribute('data-id'))})});}
+    return '<div class="card" data-id="'+esc(c.id)+'"><img loading="lazy" src="'+t+'"><div class="m"><b>'+fmt(c.timestamp)+'</b>'+c.composites.length+' composite(s) · '+c.bands.length+' band(s)</div></div>'}).join(''):'<div class="empty">no captures in this group yet</div>';
+  Array.prototype.forEach.call($('grid').children,function(el){el.addEventListener('click',function(){open(el.getAttribute('data-id'))})});}
 function open(id){var c=CAPS.find(function(x){return x.id===id});if(!c)return;
   var opts=c.composites.concat(c.bands);
   $('comp').innerHTML=opts.map(function(o){return '<option value="'+esc(o)+'">'+esc(o.replace('abi_rgb_','').replace(/_/g,' ').replace('.png',''))+'</option>'}).join('');
@@ -578,9 +682,76 @@ function open(id){var c=CAPS.find(function(x){return x.id===id});if(!c)return;
     $('full').href=IMG+rel;}
   $('comp').value=c.preferred||opts[0];show();$('comp').onchange=show;$('ovl').onchange=show;$('dlg').showModal();}
 $('dlgx').onclick=function(){$('dlg').close()};
-function loadCaps(){fetch('/api/goes/captures?recent=240',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){CAPS=d.captures||[];render();}).catch(function(){})}
+function loadGroups(){fetch('/api/goes/groups',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){GROUPS=d.groups||[];if(!cur&&GROUPS.length)cur=GROUPS[0].group;tabs();loadCaps();}).catch(function(){})}
+function loadCaps(){if(!cur)return;fetch('/api/goes/captures?group='+encodeURIComponent(cur)+'&recent=180',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){CAPS=d.captures||[];render();}).catch(function(){})}
 function loadSpace(){fetch('/api/goes/space',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){if(d.free_gb!=null)$('space').textContent=d.free_gb+' GB free · '+(d.captures||0)+' captures';}).catch(function(){})}
-tabs();loadHero();loadCaps();loadSpace();setInterval(loadHero,60000);setInterval(loadCaps,60000);
+loadHero();loadGroups();loadSpace();setInterval(loadHero,60000);setInterval(function(){loadGroups();loadCaps();},60000);
+</script></body></html>"""
+
+
+PAGE_EMWIN = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GOES EMWIN</title><style>
+:root{--bg:#0a0e16;--panel:#141b27;--line:#243245;--text:#e6edf5;--dim:#8a99b0;--accent:#4ea1ff}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,sans-serif;height:100vh;display:flex;flex-direction:column}
+header{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+header h1{font-size:1rem;font-weight:650}a{color:var(--accent);text-decoration:none}.dim{color:var(--dim);font-size:.82rem}
+.bar{padding:8px 16px;border-bottom:1px solid var(--line);display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+.bar input,.bar select{background:#0d1420;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:.35rem .5rem;font:inherit;font-size:.85rem}
+.chip{background:#1a2433;color:var(--text);border:1px solid var(--line);border-radius:999px;padding:.25rem .6rem;font-size:.76rem;cursor:pointer;display:inline-block;margin:.1rem}
+.chip.on{background:var(--accent);color:#08111d;border-color:var(--accent);font-weight:600}
+.main{flex:1;display:flex;min-height:0}
+.list{width:42%;max-width:540px;overflow:auto;border-right:1px solid var(--line)}
+.row{display:flex;gap:.5rem;padding:.5rem .8rem;border-bottom:1px solid var(--line);cursor:pointer;align-items:baseline}
+.row:hover{background:#131b28}.row.on{background:#16223a}
+.row time{color:var(--dim);font-size:.72rem;white-space:nowrap;width:3.2rem;flex:none}
+.row .cat{font-size:.64rem;border:1px solid var(--line);border-radius:999px;padding:0 .4rem;color:var(--dim);white-space:nowrap;flex:none}
+.row .nm{font-weight:600;font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.row .of{color:var(--dim);font-size:.72rem;flex:none}
+.view{flex:1;overflow:auto;padding:1rem 1.2rem;min-width:0}
+.view pre{white-space:pre-wrap;font:13px/1.5 ui-monospace,Menlo,monospace;color:#dce6f1}
+.view img{max-width:100%;height:auto;background:#000;border-radius:8px}
+.view .ph{color:var(--dim);margin-top:2rem;text-align:center}
+@media(max-width:760px){.main{flex-direction:column}.list{width:100%;max-width:none;max-height:46vh;border-right:0;border-bottom:1px solid var(--line)}}
+</style></head><body>
+<header><h1>📰 GOES EMWIN</h1><span class="dim">NWS bulletins &amp; weather graphics off the HRIT feed</span><a href="/" style="margin-left:auto">🛰 Imagery &#9656;</a></header>
+<div class="bar">
+  <input id="q" placeholder="search…" style="flex:1;min-width:110px">
+  <select id="type"><option value="">all types</option><option value="text">text</option><option value="graphic">graphics</option></select>
+  <select id="office"><option value="">all offices</option></select>
+</div>
+<div class="bar" id="cats"></div>
+<div class="main"><div class="list" id="list"></div><div class="view" id="view"><div class="ph">select a product to view</div></div></div>
+<script>
+var $=function(i){return document.getElementById(i)};var ITEMS=[],cat='',built=false;
+function esc(s){return String(s).replace(/[&<>"]/g,function(m){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]})}
+function clock(t){return new Date(t*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+function load(){
+  var u='/api/goes/emwin?recent=400';
+  if(cat)u+='&cat='+encodeURIComponent(cat);
+  if($('office').value)u+='&office='+encodeURIComponent($('office').value);
+  if($('q').value)u+='&q='+encodeURIComponent($('q').value);
+  fetch(u,{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){
+    var tf=$('type').value;
+    ITEMS=(d.items||[]).filter(function(i){return !tf||i.type===tf});
+    if(!built){buildCats(d.cats);buildOffices(d.offices);built=true;}
+    renderList();
+  }).catch(function(){})
+}
+function buildCats(cats){$('cats').innerHTML='<span class="chip on" data-c="">all</span>'+(cats||[]).map(function(c){return '<span class="chip" data-c="'+esc(c[0])+'">'+esc(c[0])+' '+c[1]+'</span>'}).join('');
+  Array.prototype.forEach.call($('cats').children,function(ch){ch.onclick=function(){cat=ch.getAttribute('data-c');Array.prototype.forEach.call($('cats').children,function(x){x.classList.remove('on')});ch.classList.add('on');load();}});}
+function buildOffices(off){$('office').innerHTML='<option value="">all offices</option>'+(off||[]).map(function(o){return '<option value="'+esc(o[0])+'">'+esc(o[0])+' ('+o[1]+')</option>'}).join('');}
+function renderList(){$('list').innerHTML=ITEMS.map(function(i){return '<div class="row" data-f="'+esc(i.file)+'"><time>'+clock(i.ts)+'</time><span class="cat">'+esc(i.cat)+'</span><span class="nm">'+(i.type==='graphic'?'\\uD83D\\uDDBC ':'')+esc(i.name)+'</span><span class="of">'+esc(i.office)+'</span></div>'}).join('')||'<div class="ph" style="padding:1rem">no products</div>';
+  Array.prototype.forEach.call($('list').children,function(el){el.addEventListener('click',function(){view(el.getAttribute('data-f'),el)})});}
+function view(file,el){if(!file)return;
+  Array.prototype.forEach.call($('list').children,function(x){x.classList.remove('on')});if(el)el.classList.add('on');
+  var url='/api/goes/emwin/file/'+encodeURIComponent(file);
+  if(/\\.(gif|jpe?g|png)$/i.test(file)){$('view').innerHTML='<img src="'+url+'" alt="">';}
+  else{fetch(url,{cache:'no-store'}).then(function(r){return r.text()}).then(function(t){$('view').innerHTML='<pre>'+esc(t)+'</pre>';}).catch(function(){$('view').innerHTML='<div class="ph">failed to load</div>';});}}
+$('q').addEventListener('input',function(){clearTimeout(window._t);window._t=setTimeout(load,300)});
+$('type').onchange=load;$('office').onchange=load;
+load();setInterval(load,60000);
 </script></body></html>"""
 
 
@@ -614,23 +785,88 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _html(self, body):
+        b = body.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def _text(self, path):
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError:
+            return self._json(404, {"error": "not found"})
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self._cors()
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
         raw, _, qs = self.path.partition("?")
         path = unquote(raw)               # decode %20 etc. before any path use
         params = {k: v[-1] for k, v in parse_qs(qs).items()}
         if path == "/" or path == "/index.html":
-            body = PAGE.encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._html(PAGE)
+        elif path == "/emwin":
+            self._html(PAGE_EMWIN)
+        elif path == "/api/goes/emwin":
+            items = emwin_index()
+            sel = items
+            cat, office, q = params.get("cat"), params.get("office"), params.get("q", "").upper()
+            if cat:
+                sel = [i for i in sel if i["cat"] == cat]
+            if office:
+                sel = [i for i in sel if i["office"] == office]
+            if q:
+                sel = [i for i in sel if q in i["file"].upper() or q in i["name"].upper()]
+            try:
+                n = int(params.get("recent", "300"))
+            except ValueError:
+                n = 300
+            cats, offices = {}, {}
+            for i in items:
+                cats[i["cat"]] = cats.get(i["cat"], 0) + 1
+                if i["office"]:
+                    offices[i["office"]] = offices.get(i["office"], 0) + 1
+            self._json(200, {"items": sel[:n], "total": len(sel),
+                             "cats": sorted(cats.items(), key=lambda x: -x[1]),
+                             "offices": sorted(offices.items())})
+        elif path.startswith("/api/goes/emwin/file/"):
+            name = path[len("/api/goes/emwin/file/"):]
+            p = _safe_path(os.path.join("EMWIN", name))
+            if not p:
+                self._json(404, {"error": "not found"})
+            elif name.lower().endswith(".txt"):
+                self._text(p)
+            else:
+                self._file(p)
         elif path == "/api/goes/latest":
             self._json(200, headline())
+        elif path == "/api/goes/groups":
+            # Distinct browse tabs (ordered) with counts + newest timestamp.
+            order = {"Full Disk": 0, "Mesoscale 1": 1, "Mesoscale 2": 2}
+            g = {}
+            for c in get_index():
+                e = g.setdefault(c["group"], {"group": c["group"], "count": 0, "latest": 0})
+                e["count"] += 1
+                e["latest"] = max(e["latest"], c["timestamp"])
+            groups = sorted(g.values(), key=lambda e: (
+                order.get(e["group"], 3 if not e["group"].startswith("L2") else 4),
+                e["group"]))
+            self._json(200, {"groups": groups})
         elif path == "/api/goes/captures":
             caps = get_index()
+            grp = params.get("group")
             sector = params.get("sector")
-            if sector:
+            if grp:
+                caps = [c for c in caps if c["group"] == grp]
+            elif sector:
                 caps = [c for c in caps if c["sector"] == sector]
             try:
                 n = int(params.get("recent", "0"))
