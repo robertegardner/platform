@@ -108,6 +108,24 @@
       "sample_rate_default": 250000,
       "bias_tee": false,
       "usb_controller": "p24"
+    },
+    "goes": {
+      "_comment": "GOES-19 HRIT/EMWIN geostationary downlink on goes.srvr (a dedicated Pi 5): Nooelec SmArTee RTL-SDR + Sawbird GOES LNA + dish. UNLIKE every other device, GOES is geostationary/continuous, so SatDump runs `live goes_hrit` ON THE PI (decode does NOT move to the rack). The Pi's goes.service command (gain/freq/samplerate) is hand-tuned and KEPT-IF-ABSENT by the pi-goes provisioner — do not auto-rewrite it from this registry (these values are documentary defaults used only on a fresh install). The rack LXC goes-archive (903/.85) rsync-PULLS goes_output and serves the gallery + goes.rg2.io API + the weather2 headline image. domain:goes keeps it out of the radio-compute device loops.",
+      "present": true,
+      "host": "goes.srvr",
+      "soapy_args": "driver=rtlsdr",
+      "antenna": "single",
+      "feed": "dish + Sawbird GOES LNA",
+      "filter": "Sawbird GOES (LNA)",
+      "role": "goes-hrit",
+      "domain": "goes",
+      "transport": "satdump-live",
+      "wire_format": "CU8",
+      "freq_hz": 1694100000,
+      "sample_rate_default": 2400000,
+      "gain": 40,
+      "bias_tee": true,
+      "usb_controller": "goes"
     }
   }
 }

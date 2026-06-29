@@ -1,0 +1,74 @@
+<!--
+  GOES-19 local image embed — a compact "current satellite view" card for the
+  weather station page (weather.bobgardner.org).
+
+  Shows the current LOCAL image from the GOES archive: normally the Full Disk
+  cropped to a Cape-Girardeau box, auto-switching to a Mesoscale sector when one
+  is parked overhead. Defaults to the Clean Longwave IR composite so it carries
+  cloud structure day AND night.
+
+  - Image: https://goes.rg2.io/api/goes/image/...  (the <img> loads cross-origin
+    without CORS; the URL comes from the API below, already percent-encoded).
+  - Metadata: GET https://goes.rg2.io/api/goes/latest -> {image_url, sector,
+    source, timestamp, age_sec}. Cross-origin fetch relies on the gallery service
+    sending Access-Control-Allow-Origin (see modules/goes-archive/goes_gallery.py).
+
+  Self-contained: namespaced rg2goes- classes + an IIFE, so it won't collide with
+  the host page's CSS/JS. Renders inline where you drop it; click opens the full
+  gallery. Light by default with a body.dark override for themed hosts.
+
+  weewx/Cheetah gotcha: include this with `#include raw "..."` (NOT a plain
+  #include) — otherwise Cheetah parses the JS `$()`/`$(...)` as a template
+  variable and the whole report fails ("cannot find 'i'"). weewx also caches the
+  compiled template keyed off the parent .tmpl's mtime, so after editing this
+  file you must `touch` the parent .tmpl and run `weectl report run`.
+-->
+<div class="rg2goes">
+  <a class="rg2goes-link" href="https://goes.rg2.io/" target="_blank" rel="noopener" title="Browse the GOES archive">
+    <div class="rg2goes-imgwrap">
+      <img id="rg2goes-img" alt="Current local GOES-19 satellite image">
+      <span class="rg2goes-badge">GOES-19</span>
+    </div>
+    <div class="rg2goes-cap">
+      <span class="rg2goes-where" id="rg2goes-where">Satellite view</span>
+      <span class="rg2goes-when" id="rg2goes-when">loading…</span>
+    </div>
+  </a>
+</div>
+<style>
+.rg2goes{font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;margin:.5rem 0;max-width:520px}
+.rg2goes-link{display:block;text-decoration:none;color:inherit;border:1px solid #d7dde5;border-radius:12px;overflow:hidden;background:#0a0e16}
+.rg2goes-imgwrap{position:relative;line-height:0;background:#000;min-height:80px}
+.rg2goes-imgwrap img{display:block;width:100%;height:auto}
+.rg2goes-badge{position:absolute;top:8px;left:8px;background:rgba(11,92,171,.92);color:#fff;font-size:.7rem;font-weight:700;letter-spacing:.04em;padding:.15rem .5rem;border-radius:999px}
+.rg2goes-cap{display:flex;justify-content:space-between;gap:1rem;padding:.5rem .75rem;background:#fff;color:#374151}
+.rg2goes-where{font-weight:600}
+.rg2goes-when{color:#6b7280}
+body.dark .rg2goes-link{border-color:#243245}
+body.dark .rg2goes-cap{background:#131b28;color:#cdd8e6}
+body.dark .rg2goes-when{color:#8a99b0}
+</style>
+<script>
+(function(){
+  var API="https://goes.rg2.io/api/goes/latest";
+  var img=document.getElementById("rg2goes-img");
+  var where=document.getElementById("rg2goes-where");
+  var when=document.getElementById("rg2goes-when");
+  function esc(s){return String(s).replace(/[&<>]/g,function(m){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[m];});}
+  function ago(s){ s=s||0; if(s<90)return s+"s ago"; if(s<5400)return Math.round(s/60)+"m ago"; return Math.round(s/3600)+"h ago"; }
+  function label(d){
+    if(d.source==="mesoscale") return "Mesoscale · local";
+    if(d.source==="fulldisk-crop") return "Regional · Cape Girardeau";
+    return d.sector||"Satellite view";
+  }
+  function render(d){
+    if(!d||!d.image_url){ where.textContent="Satellite view"; when.textContent="offline"; return; }
+    // cache-bust on the capture timestamp so a new image actually loads
+    img.src=d.image_url+(d.image_url.indexOf("?")<0?"?t="+d.timestamp:"");
+    where.textContent=label(d);
+    when.textContent=ago(d.age_sec);
+  }
+  function poll(){ fetch(API,{cache:"no-store"}).then(function(r){return r.json();}).then(render).catch(function(){}); }
+  poll(); setInterval(poll,60000);
+})();
+</script>
