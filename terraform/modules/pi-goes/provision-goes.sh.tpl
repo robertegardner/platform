@@ -133,4 +133,26 @@ systemctl enable goes-prune.timer >/dev/null 2>&1 || true
 systemctl restart goes-prune.timer || true
 echo "    goes-prune.timer: $(systemctl is-active goes-prune.timer 2>/dev/null) (retention $${PRUNE_HOURS}h)"
 
+# --- 5) Dish-aiming tool (goes-aim) -----------------------------------------
+# Serves the look angles (az/el to the GOES bird from the station) + a live
+# peaking meter off SatDump's HTTP API, on :8091. Provisioner-managed.
+install -d -m 0755 /opt/goes-aim
+cp /tmp/goes_aim.py /opt/goes-aim/goes_aim.py
+chmod 0755 /opt/goes-aim/goes_aim.py
+cat > /etc/systemd/system/goes-aim.service <<'EOF'
+[Unit]
+Description=GOES dish-aiming tool (look angles + live SatDump peaking)
+After=network-online.target
+[Service]
+ExecStart=/usr/bin/python3 /opt/goes-aim/goes_aim.py
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable goes-aim >/dev/null 2>&1 || true
+systemctl restart goes-aim || echo "    WARN: goes-aim did not start"
+echo "    goes-aim: $(systemctl is-active goes-aim 2>/dev/null) on :8091"
+
 echo "==> pi-goes done."

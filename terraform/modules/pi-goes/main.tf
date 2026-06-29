@@ -26,6 +26,7 @@ resource "null_resource" "provision" {
   triggers = {
     provision_hash = sha256(local.provision_script)
     devices        = jsonencode(var.devices)
+    goes_aim_hash  = filesha256("${path.module}/goes_aim.py")
   }
 
   connection {
@@ -43,6 +44,13 @@ resource "null_resource" "provision" {
   provisioner "file" {
     content     = local.provision_script
     destination = "/tmp/provision-goes.sh"
+  }
+
+  # The dish-aiming tool (look angles + live SatDump peaking), deployed by the
+  # provisioner as the goes-aim service.
+  provisioner "file" {
+    source      = "${path.module}/goes_aim.py"
+    destination = "/tmp/goes_aim.py"
   }
 
   # remote-exec runs WITHOUT set -e — chain so a failure isn't masked as success.
