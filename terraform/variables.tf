@@ -171,6 +171,25 @@ variable "goes_archive_ip" {
   default     = "192.168.6.85"
 }
 
+# --- ADS-B acquisition node (standalone outdoor Pi, p24) ----------------------
+variable "adsb_host" {
+  description = "Hostname/IP of the ADS-B decoder Pi (p24). Use the IP since p24.srvr may not resolve from thebeast/LXC."
+  type        = string
+  default     = "192.168.6.141"
+}
+
+variable "adsb_ssh_user" {
+  description = "SSH user on p24 (passwordless sudo for installs/systemctl)"
+  type        = string
+  default     = "rgardner"
+}
+
+variable "adsb_feeder_ip" {
+  description = "Static IP of the adsb-feeder LXC (vmid_base+4)"
+  type        = string
+  default     = "192.168.6.86"
+}
+
 variable "ssh_private_key_path" {
   description = "Private key thebeast's deploy user uses to reach the Pi"
   type        = string

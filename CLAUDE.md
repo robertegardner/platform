@@ -346,6 +346,19 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   attached, ssl_forced). `tools/goes-embed.html` is the weather2 widget (same
   `#include raw` + touch-.tmpl gotcha as wx). Details:
   [[goes-archive-integration]] memory.)
+- `adsb.rg2.io` → **192.168.6.86:8080** (tar1090 on the NEW **adsb-feeder** LXC —
+  vmid 904, `modules/adsb-feeder`). The standalone ADS-B Pi **p24** (192.168.6.141)
+  is now DECODE-ONLY (`readsb` 1090 serial 00001090 + `dump978-fa` 978 serial
+  00000001; `modules/pi-adsb`; SDR enumeration order REVERSED → select by serial)
+  and ships Beast/UAT to the rack. The LXC runs the sdr-enthusiasts **ultrafeeder**
+  3-container stack (ultrafeeder + piaware + fr24) as the single hub: aggregates,
+  serves the map, fans out to FlightAware/FR24/ADSBx + MLAT, and re-serves Beast
+  30005 + SBS 30003 for local consumers. Docker installed via **apt** (the LXC
+  template has no curl). Secrets + receiver location in keep-if-absent
+  `/etc/adsb-feeder/feeders.env` (NEVER committed; needs a global `UUID=` or
+  ultrafeeder's MLAT stays disabled). darthsideous's old FR24 Docker retired;
+  scoreboard.srvr (LED matrix, `flightradar.rg2.io`) still pulls p24:30003.
+  Details: [[adsb-p24-platform-fold]] memory.)
 - `ems.rg2.io` now serves the **V1-style amber-LCD tuner** at `/` (NFM/AM presets
   NOAA WX/Marine/EMS/KCGI-Tower-125.525/Memphis-Center, squelch, direct tune) →
   `/api/monitor/{tune,stop}` → `monitor.service` (NFM/AM on the R2, **preempts

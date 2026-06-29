@@ -4,7 +4,30 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
-## 2026-06-29 (latest) — GOES-19 HRIT gallery + weather2 headline (goes.rg2.io)
+## 2026-06-29 (latest) — ADS-B Pi (p24) folded into the platform
+
+**State: the standalone ADS-B feeder is now a platform tier. `p24` is DECODE-ONLY
+(readsb 1090 + dump978-fa 978 → Beast/SBS on the LAN); a NEW `adsb-feeder` LXC
+(vmid 904 / 192.168.6.86) runs the sdr-enthusiasts ultrafeeder 3-container stack as
+the single hub — aggregates, serves tar1090 (adsb.rg2.io), and fans out to
+FlightAware/FR24/ADSBx + MLAT. LIVE.**
+
+- **p24 → decode-only** (`modules/pi-adsb`): readsb replaced dump1090-mutability
+  (SDR serial 00001090, gain auto), dump978-fa kept (00000001); the on-Pi feeders
+  (piaware, adsbexchange-*) + local maps (tar1090-adsbx, skyaware978) retired. SDR
+  enumeration order is REVERSED (index 0 = the 978 dongle) → select by serial.
+- **Rack hub** (`modules/adsb-feeder`, Docker-in-unpriv-LXC, nesting on, no USB):
+  ultrafeeder (readsb+tar1090+MLAT+ADSBx-native) + piaware + fr24 sidecars. Docker
+  via **apt** (the Ubuntu LXC template ships no curl → get.docker.com fails). Secrets
+  + receiver in keep-if-absent `/etc/adsb-feeder/feeders.env` (never committed).
+- **Gotcha:** ultrafeeder's mlat-client needs a GLOBAL `UUID=` env at startup or it
+  disables MLAT before reading the per-line `uuid=`.
+- darthsideous's old FR24 Docker retired (Portainer stack remains — delete in UI).
+  scoreboard LED matrix (flightradar.rg2.io) left pulling p24:30003 (decoder-direct,
+  resilient). Verified: ~50 aircraft on adsb.rg2.io, no cliff through the cutover.
+  Spec/plan: `docs/superpowers/{specs,plans}/2026-06-29-adsb-platform-fold*`.
+
+## 2026-06-29 — GOES-19 HRIT gallery + weather2 headline (goes.rg2.io)
 
 **State: a dedicated GOES Pi (`goes.srvr` = 192.168.6.134, Pi 5; Nooelec SmArTee +
 Sawbird GOES + dish) decodes GOES-19 HRIT live with SatDump. NEW `pi-goes` module
