@@ -63,7 +63,14 @@ LOCAL_DX, LOCAL_DY = float(_win[0]), float(_win[-1])
 MESO_MAX_AGE = int(os.environ.get("GOES_MESO_MAX_AGE_SEC", "1800"))
 PUBLIC_BASE = os.environ.get("GOES_PUBLIC_BASE", "").rstrip("/")
 INDEX_TTL = int(os.environ.get("GOES_INDEX_TTL", "30"))
-THUMB_W = int(os.environ.get("GOES_THUMB_W", "360"))
+THUMB_W = int(os.environ.get("GOES_THUMB_W", "340"))
+# Full-res source PNGs are huge (Full Disk 5424² ≈ 23 MB). The viewer serves a
+# downscaled JPEG "preview" (≈0.6 MB) instead; a "full resolution" link still
+# points at the raw PNG. Thumbs + previews are JPEG and pre-generated in the
+# background so nothing is decoded on-demand.
+PREVIEW_W = int(os.environ.get("GOES_PREVIEW_W", "2048"))
+JPEG_Q = int(os.environ.get("GOES_JPEG_Q", "82"))
+PREGEN_INTERVAL = int(os.environ.get("GOES_PREGEN_INTERVAL", "45"))
 # Map overlay (drawn rack-side via the GOES projection — SatDump only ships
 # coastline/country shapefiles, not US state lines). On for the headline by default.
 OVERLAY_ON = os.environ.get("GOES_OVERLAY", "1") == "1"
@@ -447,23 +454,54 @@ def headline():
 
 
 # ---- thumbnails ------------------------------------------------------------
-def ensure_thumb(relpath):
-    """Cached THUMB_W-wide thumbnail for an archive image; returns its absolute path."""
+def _scaled(relpath, maxdim, subdir):
+    """Cached ≤maxdim JPEG of an archive image under derived/<subdir>/. Returns the
+    absolute path, or None. Decoding the 5424² source is the cost (~1s), so these
+    are cached and pre-generated (see _pregen_loop) — never made on the hot path
+    if it can be helped."""
     src = _safe_path(relpath)
     if not src:
         return None
-    out = os.path.join(DERIVED, "thumbs", relpath.replace(os.sep, "__"))
+    out = os.path.join(DERIVED, subdir, relpath.replace(os.sep, "__") + ".jpg")
     try:
         if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(src):
             return out
         os.makedirs(os.path.dirname(out), exist_ok=True)
         with Image.open(src) as im:
-            im.thumbnail((THUMB_W, THUMB_W))
-            im.convert("RGB").save(out, "PNG")
+            im.thumbnail((maxdim, maxdim))
+            im.convert("RGB").save(out, "JPEG", quality=JPEG_Q, optimize=True)
         return out
     except (OSError, ValueError) as e:
-        log(f"thumb failed {src}: {e}")
+        log(f"scale failed {src}: {e}")
         return None
+
+
+def ensure_thumb(relpath):
+    """Cached JPEG grid thumbnail."""
+    return _scaled(relpath, THUMB_W, "thumbs")
+
+
+def ensure_preview(relpath):
+    """Cached JPEG viewer preview (≤PREVIEW_W) — what the dialog shows by default
+    instead of the 23 MB raw PNG."""
+    return _scaled(relpath, PREVIEW_W, "preview")
+
+
+def _pregen_loop():
+    """Background worker: pre-generate the grid thumbnail + viewer preview for each
+    capture's preferred composite, so browsing never blocks on a ~1s PNG decode.
+    Only missing/stale ones are (re)built; new captures are picked up each pass."""
+    while True:
+        try:
+            for c in get_index():
+                pref = c.get("preferred")
+                if pref:
+                    rel = os.path.join(c["dir"], pref)
+                    ensure_thumb(rel)
+                    ensure_preview(rel)
+        except Exception as e:  # noqa: BLE001
+            log(f"pregen: {e}")
+        time.sleep(PREGEN_INTERVAL)
 
 
 # ---- path safety -----------------------------------------------------------
@@ -513,7 +551,7 @@ dialog .dh select,dialog .dh button{background:#1a2433;color:var(--text);border:
 <div class="tabs" id="tabs"></div>
 <div class="grid" id="grid"><div class="empty">loading…</div></div>
 </div>
-<dialog id="dlg"><div class="dh"><select id="comp"></select><label class="dim" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="ovl">overlay</label><span class="dim" id="dlgmeta"></span><button id="dlgx">close</button></div><img id="dlgimg" alt=""></dialog>
+<dialog id="dlg"><div class="dh"><select id="comp"></select><label class="dim" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="ovl">overlay</label><a class="dim" id="full" target="_blank" rel="noopener" style="text-decoration:underline">full res &#8595;</a><span class="dim" id="dlgmeta"></span><button id="dlgx">close</button></div><img id="dlgimg" alt=""></dialog>
 <script>
 var $=function(i){return document.getElementById(i)};var IMG="/api/goes/image/";
 var SECTORS=["Full Disk","Mesoscale 1","Mesoscale 2"];var cur="Full Disk";var CAPS=[];
@@ -535,7 +573,9 @@ function open(id){var c=CAPS.find(function(x){return x.id===id});if(!c)return;
   var opts=c.composites.concat(c.bands);
   $('comp').innerHTML=opts.map(function(o){return '<option value="'+esc(o)+'">'+esc(o.replace('abi_rgb_','').replace(/_/g,' ').replace('.png',''))+'</option>'}).join('');
   $('dlgmeta').textContent=c.sector+' · '+fmt(c.timestamp);
-  function show(){$('dlgimg').src=IMG+encodeURI(c.dir+'/'+$('comp').value)+($('ovl').checked?'?overlay=1':'')}
+  function show(){var rel=encodeURI(c.dir+'/'+$('comp').value);
+    $('dlgimg').src=$('ovl').checked?(IMG+rel+'?overlay=1'):(IMG+'preview/'+rel);  // light preview, not the 23MB raw
+    $('full').href=IMG+rel;}
   $('comp').value=c.preferred||opts[0];show();$('comp').onchange=show;$('ovl').onchange=show;$('dlg').showModal();}
 $('dlgx').onclick=function(){$('dlg').close()};
 function loadCaps(){fetch('/api/goes/captures?recent=240',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){CAPS=d.captures||[];render();}).catch(function(){})}
@@ -567,7 +607,7 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             return self._json(404, {"error": "not found"})
         self.send_response(200)
-        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Type", "image/jpeg" if path.endswith(".jpg") else "image/png")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", f"public, max-age={max_age}")
         self._cors()
@@ -602,6 +642,10 @@ class Handler(BaseHTTPRequestHandler):
             rel = path[len("/api/goes/image/thumb/"):]
             t = ensure_thumb(rel)
             self._file(t) if t else self._json(404, {"error": "not found"})
+        elif path.startswith("/api/goes/image/preview/"):
+            rel = path[len("/api/goes/image/preview/"):]
+            p = ensure_preview(rel)
+            self._file(p) if p else self._json(404, {"error": "not found"})
         elif path.startswith("/api/goes/image/"):
             rel = path[len("/api/goes/image/"):]
             if params.get("overlay") == "1":      # gallery toggle: annotate on demand
@@ -624,9 +668,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     os.makedirs(DERIVED, exist_ok=True)
+    threading.Thread(target=_pregen_loop, daemon=True, name="pregen").start()
     log(f"goes-gallery on :{PORT} archive={ARCHIVE} sat={SAT} "
         f"preferred={PREFERRED} crop={CROP_BOX} cbor2={cbor2 is not None} "
-        f"home_scan={HOME_SCAN}")
+        f"home_scan={HOME_SCAN} thumb={THUMB_W} preview={PREVIEW_W}")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 
