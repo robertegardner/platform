@@ -13,7 +13,7 @@ echo "==> weather-compute provisioning on $(hostname) — weewx 5 + nginx (read 
 
 # --- 1) Base packages (the Ubuntu LXC template ships no curl/wget/gnupg) ------
 apt-get update -qq
-apt-get install -y wget gnupg nginx rsync sqlite3 python3-paho-mqtt >/dev/null 2>&1 \
+apt-get install -y wget gnupg dirmngr nginx rsync sqlite3 python3-paho-mqtt >/dev/null 2>&1 \
   || echo "    WARN: base package install failed"
 
 # --- 2) weewx 5 from the weewx apt repo --------------------------------------
@@ -21,10 +21,14 @@ if command -v weewxd >/dev/null 2>&1 || dpkg -l weewx >/dev/null 2>&1; then
   echo "    weewx present: $(weewxd --version 2>/dev/null)"
 else
   echo "    adding the weewx apt repo + installing weewx 5"
-  wget -qO - https://weewx.com/keys.html 2>/dev/null | grep -oE "[A-F0-9]{40}" >/dev/null 2>&1 || true
-  # weewx 5 python3 repo (arch=all). Key + list per weewx.com/docs install.
-  wget -qO /etc/apt/trusted.gpg.d/weewx.gpg https://weewx.com/apt/weewx-python3.gpg 2>/dev/null \
-    || echo "    WARN: weewx key fetch failed"
+  # weewx repo signing key (B7D370EC17FC079E). weewx.com's published key URL went
+  # empty, so pull the key from the Ubuntu keyserver by id. Repo suite = buster
+  # (the weewx python3 repo reports Suite: buster for all paths; arch=all).
+  gpg --no-default-keyring --keyring /tmp/wx-kr.gpg --keyserver keyserver.ubuntu.com \
+    --recv-keys B7D370EC17FC079E >/dev/null 2>&1 \
+    && gpg --no-default-keyring --keyring /tmp/wx-kr.gpg --export > /etc/apt/trusted.gpg.d/weewx.gpg \
+    || echo "    WARN: weewx key import failed"
+  rm -f /tmp/wx-kr.gpg
   echo "deb [arch=all] https://weewx.com/apt/python3 buster main" > /etc/apt/sources.list.d/weewx.list
   apt-get update -qq
   # Non-interactive: take the package defaults (Simulator); the REAL config is
