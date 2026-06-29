@@ -182,13 +182,12 @@ module "adsb_feeder" {
 }
 
 # Tier 1 (extra) — pi-adsb: p24 decode-only (readsb 1090 + dump978-fa 978),
-# Beast/SBS to the rack. WIRED IN PHASE 3 (the module files land in Task 5);
-# uncomment then so `terraform validate` stays green until the module exists.
-# module "pi_adsb" {
-#   source = "./modules/pi-adsb"
-#
-#   adsb_host            = var.adsb_host
-#   ssh_user             = var.adsb_ssh_user
-#   ssh_private_key_path = var.ssh_private_key_path
-#   devices              = local.adsb_devices
-# }
+# Beast/SBS to the rack. No depends_on the rack (runtime concern).
+module "pi_adsb" {
+  source = "./modules/pi-adsb"
+
+  adsb_host            = var.adsb_host
+  ssh_user             = var.adsb_ssh_user
+  ssh_private_key_path = var.ssh_private_key_path
+  devices              = local.adsb_devices
+}
