@@ -61,6 +61,11 @@ HOME_LON = float(os.environ.get("GOES_HOME_LON", "-89.52"))
 _win = os.environ.get("GOES_LOCAL_SCAN_WINDOW", "0.020,0.020").split(",")
 LOCAL_DX, LOCAL_DY = float(_win[0]), float(_win[-1])
 MESO_MAX_AGE = int(os.environ.get("GOES_MESO_MAX_AGE_SEC", "1800"))
+# Headline (weather2 embed): default to the fixed Cape-cropped Full Disk. Set
+# GOES_HEADLINE_PREFER_MESO=1 to instead show a fresh mesoscale when one is parked
+# over the local area (the old default — disabled because the roaming sectors are
+# hard to place at a glance).
+HEADLINE_PREFER_MESO = os.environ.get("GOES_HEADLINE_PREFER_MESO", "0") == "1"
 PUBLIC_BASE = os.environ.get("GOES_PUBLIC_BASE", "").rstrip("/")
 INDEX_TTL = int(os.environ.get("GOES_INDEX_TTL", "30"))
 THUMB_W = int(os.environ.get("GOES_THUMB_W", "340"))
@@ -458,28 +463,35 @@ def _image_url(relpath):
 
 
 def headline():
-    """The current local image: a fresh local mesoscale if available, else the
-    Cape-cropped Full Disk. Returns a JSON-able dict (or {} if the archive is empty)."""
+    """The current local image: the Cape-cropped Full Disk by default (a fixed,
+    clearly-local zoom). Optionally a fresh local mesoscale when GOES_HEADLINE_PREFER_MESO
+    is set. Returns a JSON-able dict (or {} if the archive is empty)."""
     caps = get_index()
     if not caps:
         return {}
     now = time.time()
-    # 1) Prefer a fresh mesoscale sector parked over the local area.
-    for sector in ("Mesoscale 1", "Mesoscale 2"):
-        m = latest_in(sector, caps)
-        if not m or (now - m["timestamp"]) > MESO_MAX_AGE:
-            continue
-        cap_dir = os.path.join(ARCHIVE, m["dir"])
-        if mesoscale_is_local(cap_dir) and m["preferred"]:
-            rel = os.path.join(m["dir"], m["preferred"])
-            if OVERLAY_ON:
-                rel = _ensure_overlay(rel) or rel    # overlaid mesoscale, else raw
-            return {"satellite": SAT, "sector": sector, "source": "mesoscale",
-                    "composite": m["preferred"], "timestamp": m["timestamp"],
-                    "age_sec": int(now - m["timestamp"]),
-                    "image_url": _image_url(rel)}
-    # 2) Fall back to the Cape-cropped Full Disk (always covers home, day or night).
-    fd = latest_in("Full Disk", caps)
+    # 1) OPTIONALLY prefer a fresh mesoscale sector parked over the local area. Off
+    #    by default: the mesoscale floaters roam, so it's hard to tell where they're
+    #    aimed — the fixed Cape crop (#2) is the clearer, consistent local view.
+    if HEADLINE_PREFER_MESO:
+        for sector in ("Mesoscale 1", "Mesoscale 2"):
+            m = latest_in(sector, caps)
+            if not m or (now - m["timestamp"]) > MESO_MAX_AGE:
+                continue
+            cap_dir = os.path.join(ARCHIVE, m["dir"])
+            if mesoscale_is_local(cap_dir) and m["preferred"]:
+                rel = os.path.join(m["dir"], m["preferred"])
+                if OVERLAY_ON:
+                    rel = _ensure_overlay(rel) or rel    # overlaid mesoscale, else raw
+                return {"satellite": SAT, "sector": sector, "source": "mesoscale",
+                        "composite": m["preferred"], "timestamp": m["timestamp"],
+                        "age_sec": int(now - m["timestamp"]),
+                        "image_url": _image_url(rel)}
+    # 2) Default: the Cape-cropped ABI Full Disk (always covers home, day or night).
+    #    Match the "Full Disk" GROUP, not the sector — L2 full-disk products share
+    #    sector="Full Disk" and would otherwise win, giving a derived-product crop
+    #    instead of the Clean Longwave IR satellite view.
+    fd = next((c for c in caps if c.get("group") == "Full Disk"), None)
     if fd:
         comp = (PREFERRED + ".png") if (PREFERRED + ".png") in fd["composites"] \
             else (fd["composites"][0] if fd["composites"] else fd["preferred"])
