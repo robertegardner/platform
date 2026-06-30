@@ -745,13 +745,29 @@ def _stamp_frame(frame, ts):
 
 
 def _anim_sources(group, comp, n):
-    """Most-recent-N (group, composite) frames, oldest->newest, as (relpath, ts)."""
-    caps = [c for c in get_index() if c["group"] == group][:max(2, min(ANIM_MAXN, n))]
+    """Most-recent-N (group, composite) frames, oldest->newest, as (relpath, ts).
+
+    With a specific composite requested, ONLY captures that actually contain it are
+    used — captures missing it are SKIPPED, not substituted with their preferred
+    composite. Otherwise a recent capture that hasn't acquired this composite yet
+    would drop a different image category into the loop and disrupt it."""
+    limit = max(2, min(ANIM_MAXN, n))
     out = []
-    for c in reversed(caps):                       # oldest -> newest = forward play
-        use = comp if comp and (comp in c["composites"] or comp in c["bands"]) else c.get("preferred")
-        if use:
-            out.append((os.path.join(c["dir"], use), c["timestamp"]))
+    for c in get_index():                          # newest first
+        if c["group"] != group:
+            continue
+        if comp:
+            if comp not in c["composites"] and comp not in c["bands"]:
+                continue                           # skip — keep the loop one category
+            use = comp
+        else:
+            use = c.get("preferred")
+        if not use:
+            continue
+        out.append((os.path.join(c["dir"], use), c["timestamp"]))
+        if len(out) >= limit:
+            break
+    out.reverse()                                  # oldest -> newest = forward play
     return out
 
 
