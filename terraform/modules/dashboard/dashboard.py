@@ -47,6 +47,8 @@ ICECAST_BASE = os.environ.get("DASH_ICECAST_BASE", "http://192.168.6.82:8000")
 OPEN_RADIO = os.environ.get("DASH_OPEN_RADIO", "https://radio.rg2.io/dash")
 OPEN_SCANNER = os.environ.get("DASH_OPEN_SCANNER", "https://ems.rg2.io")
 OPEN_GOES = os.environ.get("DASH_OPEN_GOES", "https://goes.rg2.io")
+# GOES dish-aiming/peaking tool (goes-aim.service on the GOES Pi, LAN-only HTTP).
+OPEN_GOES_AIM = os.environ.get("DASH_OPEN_GOES_AIM", "http://192.168.6.134:8091/")
 OPEN_WEATHER = os.environ.get("DASH_OPEN_WEATHER", "https://w.rg2.io")
 OPEN_ADSB = os.environ.get("DASH_OPEN_ADSB", "https://adsb.rg2.io")
 OPEN_ICECAST = os.environ.get("DASH_OPEN_ICECAST", "https://icecast.rg2.io")
@@ -221,7 +223,8 @@ def poll_scanner():
 def poll_goes():
     data, err = _get_json(f"{GOES_BASE}/api/goes/latest")
     space, _ = _get_json(f"{GOES_BASE}/api/goes/space")
-    tile = {"title": "Satellite", "icon": "\U0001F6F0️", "open_url": OPEN_GOES}
+    tile = {"title": "Satellite", "icon": "\U0001F6F0️", "open_url": OPEN_GOES,
+            "aim_url": OPEN_GOES_AIM}
     if not data:
         tile.update(state="down", headline="No imagery", detail=err or "archive empty")
         with _LOCK:
@@ -303,7 +306,15 @@ def poll_weather():
         temp = _num(cur.get("outTemp_formatted") or cur.get("outTemp"))
         feels = _num(cur.get("appTemp"))
         hum = cur.get("outHumidity") or ""
-        wind = f"{cur.get('windcompass', '')} {cur.get('windspeed', '')}".strip()
+        # Davis reports windcompass "N/A" when calm — show "calm" not "N/A 0 mph".
+        wspd = _num(cur.get("windspeed"))
+        wcomp = (cur.get("windcompass") or "").strip()
+        if wspd == 0:
+            wind = "calm"
+        elif wcomp and wcomp.upper() != "N/A":
+            wind = f"{wcomp} {cur.get('windspeed', '')}".strip()
+        else:
+            wind = (cur.get("windspeed") or "").strip()
         t = f"{round(temp)}°F" if temp is not None else "—"
         det = []
         if feels is not None and temp is not None and abs(feels - temp) >= 2:
@@ -613,6 +624,10 @@ audio{width:100%;height:34px;border-radius:var(--r-pill);filter:saturate(.9)}
   border:1px solid var(--outline);transition:background .15s,transform .1s}
 .open:hover{background:var(--sc-hi2)}
 .open:active{transform:scale(.97)}
+.acts{margin-left:auto;display:flex;align-items:center;gap:8px}
+.acts .open{margin-left:0}
+.open.alt{background:transparent;color:var(--on-v);border-color:var(--outline)}
+.open.alt:hover{background:var(--sc-hi2);color:var(--on)}
 .open .ar{font-size:1.05rem;line-height:1}
 .state-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.6px;
   color:var(--on-v);font-weight:600}
@@ -693,7 +708,10 @@ function card(key,d){
     '<div class="detail">'+esc(d.detail||"")+'</div>'+
     preview(key,d)+
     '<div class="foot"><span class="state-label">'+STATES[st]+'</span>'+
-      '<a class="open" href="'+esc(d.open_url||"#")+'" target="_blank" rel="noopener">Open <span class="ar">→</span></a></div>'+
+      '<div class="acts">'+
+        (d.aim_url?'<a class="open alt" href="'+esc(d.aim_url)+'" target="_blank" rel="noopener" title="Dish aiming + signal peaking">Aim</a>':'')+
+        '<a class="open" href="'+esc(d.open_url||"#")+'" target="_blank" rel="noopener">Open <span class="ar">→</span></a>'+
+      '</div></div>'+
   '</article>';
 }
 
