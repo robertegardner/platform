@@ -4,7 +4,49 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
-## 2026-06-30 (latest) — unified platform dashboard (`home.rg2.io`)
+## 2026-06-30 (latest) — scanner UI cleanup + GOES gallery fixes
+
+**State: all LIVE + merged to main.** Two threads on top of the dashboard work.
+
+**Scanner — mode-centric `ems.rg2.io`** (scanner repo `v2/scanner_api.py`
+`CAPTIONS_HTML`; PRs scanner#10 + platform#10). The page was a V1 airband tuner
+that predated the R2-mode coordinator; rebuilt around the single-tuner reality:
+- A `NOAA · default / P25 / ATC` segmented switcher reads `/api/r2/state` (active =
+  green dot); one click POSTs `/api/r2/mode` (P25/NOAA) or tunes (ATC) → `r2-mode.sh`,
+  with a "switching ~15s" state. Per-mode panel: **NOAA** `/wx.mp3` player; **P25**
+  live talkgroup (`/api/status`) + `/ems.mp3` player + a **running transcript**; **ATC**
+  the amber-LCD airband tuner.
+- **Bugs fixed:** stale "preempts P25" → "preempts NOAA" (ATC preempts the 24/7 NOAA
+  default), everywhere — page text/status/comments + CLAUDE.md + the scanner-compute
+  provisioner echo. The dangling header "P25 console" link is gone.
+- **scanner.rg2.io 502 explained:** op25's console (`:8080`) only runs in P25 mode, so
+  it 502s on NOAA/ATC. op25's console **can't be iframed** (X-Frame-Options →
+  "refused to connect"), so the embed was replaced with a live auto-scrolling
+  transcript (`/api/transcript`, in-progress `/api/transcribe` line) + a "console ↗"
+  link that opens it in a new tab. Also fixed the doubled "TG TG" talkgroup readout.
+- **Verified by the user: P25 + ATC functioned correctly; NOAA restored.**
+
+**GOES gallery** (`modules/goes-archive/goes_gallery.py`; platform PRs #11–#13, all
+deployed via targeted `module.goes_archive` apply):
+- **EMWIN defaults to local office KPAH** (NWS Paducah); the office dropdown still
+  filters all 191 offices (offices list is computed from the full index, so it stays
+  complete; falls back to "all" if KPAH has no products). (#11)
+- **GIF loop download was 0 bytes** (#12): cold synchronous gen hit ~20s/31MB →
+  client/proxy timed out (BrokenPipeError) and a partial gen left a 0-byte file
+  cached + served. Fix: cap the GIF to 24f@720px (WebP loop keeps 1100px/48) →
+  ~3–5s/~6MB; **atomic write** (`.tmp`→`os.replace`) + cache check requires
+  `getsize()>0`; `_file` tolerates client disconnects.
+- **Loop frames mixed categories** (#12): `_anim_sources` substituted a capture's
+  *preferred* composite for any capture missing the requested one, so a newest
+  capture that hadn't acquired e.g. ABI False Color yet dropped a different-category
+  last frame. Now captures missing the exact composite are SKIPPED (window reaches
+  one further back) → every frame is the same composite.
+- **GIF rendered black as transparent** (#13): `optimize=True`+`disposal=2` assigned
+  an inter-frame transparency index coinciding with black (the off-disk space). Fix:
+  `optimize=False`+`disposal=1`+strip `transparency` → fully opaque (alpha 255
+  everywhere; off-disk corner = `(0,0,0,255)`).
+
+## 2026-06-30 — unified platform dashboard (`home.rg2.io`)
 
 **State: LIVE at `https://home.rg2.io` (applied 2026-06-30).** New
 `modules/dashboard` LXC (vmid 906 / 192.168.6.88) serving the
