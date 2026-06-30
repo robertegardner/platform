@@ -24,6 +24,7 @@ Env: WX_PORT (8090), WX_DECODE_URL (internal mount to decode),
      on first run; thereafter the page toggles own it), WX_FIPS_STATE (persisted
      active-set path, default /var/lib/radio-compute/wx-fips.json).
 """
+import datetime
 import json
 import os
 import subprocess
@@ -171,11 +172,12 @@ def parse_same(header):
             "tier": tier, "category": category_for(event),
             "priority": tier in ("extreme", "severe"),
             "raw": h, "ts": ts, "expires": ts + (dur_secs or 1800),
+            "source": "same",
         }
     except (IndexError, ValueError):
         ts = int(time.time())
         return {"event_code": "???", "event": "Unparsed SAME", "raw": h,
-                "tier": "advisory", "category": "other",
+                "tier": "advisory", "category": "other", "source": "same",
                 "priority": False, "areas": [], "ts": ts, "expires": ts + 1800}
 
 
@@ -284,6 +286,133 @@ def handle_alert(alert):
         pass
     threading.Thread(target=fire_webhook, args=(alert,), daemon=True).start()
     threading.Thread(target=enrich_alert_bg, args=(alert,), daemon=True).start()
+
+
+# ---- NWS active-alerts poller ---------------------------------------------
+# The SAME audio decoder only fires on a broadcast SAME burst. Long-fuse events
+# (heat, air quality, some flood/wind products) are routinely issued WITHOUT a
+# dedicated SAME tone on the local NWR, so they never reach the decoder (e.g. an
+# Extreme Heat Warning carries eventCode SAME='NWS', no EEE). This poller queries
+# api.weather.gov for alerts ACTIVE over the home point, filters to the active
+# county set, and marks the most significant one active so it shows on the page +
+# flows to the dashboard. DISPLAY ONLY — it does NOT fire the HA webhook; the
+# on-air SAME burst remains the webhook (house-response) trigger.
+NWS_POINT = os.environ.get("WX_NWS_POINT", "37.30,-89.52")
+NWS_POLL_SEC = int(os.environ.get("WX_NWS_POLL_SEC", "120"))
+NWS_UA = "wx-alert/1.0 (rg2.io homelab; robertegardner@gmail.com)"
+_TIER_RANK = {"extreme": 3, "severe": 2, "advisory": 1}
+
+
+def _rank(a):
+    return _TIER_RANK.get((a or {}).get("tier"), 0)
+
+
+def _iso_epoch(s):
+    if not s:
+        return None
+    try:
+        return int(datetime.datetime.fromisoformat(
+            str(s).replace("Z", "+00:00")).timestamp())
+    except (ValueError, TypeError):
+        return None
+
+
+def _nws_tier(p):
+    """Map an NWS alert to our 3-tier scale: NWS severity first, then SAME code."""
+    sev = (p.get("severity") or "").lower()
+    if sev == "extreme":
+        return "extreme"
+    if sev == "severe":
+        return "severe"
+    return tier_for(((p.get("eventCode") or {}).get("SAME") or [""])[0])
+
+
+def nws_to_alert(p, active):
+    """Build an internal alert dict from NWS alert properties (source='nws')."""
+    code = ((p.get("eventCode") or {}).get("SAME") or [None])[0]
+    if not code or code == "NWS":                  # no dedicated SAME EEE
+        nwsc = (p.get("eventCode") or {}).get("NationalWeatherService") or []
+        code = (nwsc[0] if nwsc else (p.get("event") or "")[:3].upper()) or "???"
+    # Only the user's active counties (not all ~60 in a regional product).
+    areas = sorted(s for s in (p.get("geocode") or {}).get("SAME", [])
+                   if str(s)[-5:] in active)
+    ev = p.get("event") or EVENT_NAMES.get(code, code)
+    evl = ev.lower()
+    cat = "warning" if "warning" in evl else ("watch" if "watch" in evl
+                                              else "statement")
+    tier = _nws_tier(p)
+    ends = _iso_epoch(p.get("ends")) or _iso_epoch(p.get("expires"))
+    onset = _iso_epoch(p.get("onset")) or _iso_epoch(p.get("effective")) \
+        or int(time.time())
+    return {
+        "event_code": code, "event": ev, "org": "NWS", "areas": areas,
+        "tier": tier, "category": cat, "priority": tier in ("extreme", "severe"),
+        "source": "nws", "id": p.get("id"), "station": p.get("senderName") or "NWS",
+        "ts": onset, "expires": ends or (int(time.time()) + 21600),
+        "nws_url": nws_link(areas[0]) if areas else "https://www.weather.gov/",
+        "nws": {"event": ev, "headline": p.get("headline") or "",
+                "areaDesc": p.get("areaDesc") or "",
+                "description": p.get("description") or "",
+                "instruction": p.get("instruction") or "",
+                "severity": p.get("severity") or "", "urgency": p.get("urgency") or "",
+                "certainty": p.get("certainty") or "",
+                "messageType": p.get("messageType") or ""},
+    }
+
+
+def nws_best_active():
+    """Most significant NWS alert active over the home point AND an active county.
+
+    Returns an alert dict, None (nothing active), or 'error' (poll failed — caller
+    leaves STATE untouched so a transient outage can't clear a real alert)."""
+    try:
+        req = urllib.request.Request(
+            f"https://api.weather.gov/alerts/active?point={NWS_POINT}",
+            headers={"User-Agent": NWS_UA, "Accept": "application/geo+json"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            feats = json.load(r).get("features", [])
+    except Exception as e:  # noqa: BLE001
+        log(f"nws poll error: {e}")
+        return "error"
+    with _LOCK:
+        active = set(ACTIVE_FIPS)
+    cands = []
+    for ft in feats:
+        p = ft.get("properties", {})
+        same = {str(s)[-5:] for s in (p.get("geocode") or {}).get("SAME", [])}
+        if same & active:
+            cands.append(nws_to_alert(p, active))
+    if not cands:
+        return None
+    cands.sort(key=lambda a: (_rank(a), a.get("ts", 0)), reverse=True)
+    return cands[0]
+
+
+def nws_poll_loop():
+    while True:
+        best = nws_best_active()
+        if best != "error":
+            now = int(time.time())
+            with _LOCK:
+                cur = STATE["active"]
+                cur_valid = cur and (not cur.get("expires") or cur["expires"] > now)
+                if best:
+                    take = (not cur_valid) or _rank(best) > _rank(cur) \
+                        or cur.get("source") == "nws"
+                    # A still-valid on-air SAME alert of >= tier wins ties.
+                    if cur_valid and cur.get("source") == "same" \
+                            and _rank(cur) >= _rank(best):
+                        take = False
+                    if take:
+                        STATE["active"] = best
+                        STATE["updated"] = now
+                        log(f"nws active: {best['event']} tier={best['tier']} "
+                            f"areas={best['areas']}")
+                elif cur and cur.get("source") == "nws":
+                    STATE["active"] = None          # the NWS alert ended
+                    STATE["updated"] = now
+                    log("nws active cleared")
+        time.sleep(NWS_POLL_SEC)
 
 
 def decoder_loop():
@@ -517,6 +646,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     threading.Thread(target=decoder_loop, daemon=True, name="same-decoder").start()
+    threading.Thread(target=nws_poll_loop, daemon=True, name="nws-poller").start()
     log(f"wx-alert on :{PORT} decode={DECODE_URL} webhook={'set' if HA_WEBHOOK_URL else 'none'} "
         f"counties={','.join(sorted(ACTIVE_FIPS))}")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

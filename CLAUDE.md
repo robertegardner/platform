@@ -340,7 +340,16 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   NOAA Weather Radio page: `/wx.mp3` player + a live **SAME/EAS alert banner**.
   Decodes alerts off `/wx.mp3` (`ffmpeg | multimon-ng -a EAS`); on an alert fires
   a webhook (`HA_WEBHOOK_URL` in `wx-alert.env` → Home Assistant, for house
-  speakers/push) + logs. NPM host created (clone of radio.rg2.io). DNS resolves
+  speakers/push) + logs. **ALSO polls api.weather.gov** (`nws_poll_loop`, every
+  `WX_NWS_POLL_SEC`=120s, point `WX_NWS_POINT`) for alerts ACTIVE over the home
+  point, filtered to the active county set — this catches LONG-FUSE events that
+  carry NO dedicated SAME tone on the NWR (heat/air-quality/some flood-wind; e.g.
+  an Extreme Heat Warning has SAME eventCode `NWS`, so the audio decoder never
+  hears it). NWS-sourced alerts are tagged `source:nws`, tier from NWS severity,
+  and are **DISPLAY-ONLY (no webhook)** — the on-air SAME burst stays the house
+  trigger; a still-valid SAME alert of ≥ tier wins ties. This is what flows the
+  active alert to the dashboard weather tile (which reads `/api/alert`). NPM host
+  created (clone of radio.rg2.io). DNS resolves
   via the `*.rg2.io` wildcard, but **needs a per-domain TLS cert** (cloned host
   serves radio.rg2.io's cert). `POST /api/test` injects a test alert. The HA
   webhook needs a non-default `User-Agent` — Cloudflare 403s `Python-urllib`.
