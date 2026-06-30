@@ -1001,24 +1001,28 @@ header h1{font-size:1rem;font-weight:650}a{color:var(--accent);text-decoration:n
 <div class="bar" id="cats"></div>
 <div class="main"><div class="list" id="list"></div><div class="view" id="view"><div class="ph">select a product to view</div></div></div>
 <script>
-var $=function(i){return document.getElementById(i)};var ITEMS=[],cat='',built=false;
+var $=function(i){return document.getElementById(i)};
+var DEFAULT_OFFICE='KPAH';  // NWS Paducah — our local CWA; the dropdown can switch
+var ITEMS=[],cat='',office=DEFAULT_OFFICE,built=false;
 function esc(s){return String(s).replace(/[&<>"]/g,function(m){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]})}
 function clock(t){return new Date(t*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
 function load(){
   var u='/api/goes/emwin?recent=400';
   if(cat)u+='&cat='+encodeURIComponent(cat);
-  if($('office').value)u+='&office='+encodeURIComponent($('office').value);
+  if(office)u+='&office='+encodeURIComponent(office);
   if($('q').value)u+='&q='+encodeURIComponent($('q').value);
   fetch(u,{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){
     var tf=$('type').value;
     ITEMS=(d.items||[]).filter(function(i){return !tf||i.type===tf});
-    if(!built){buildCats(d.cats);buildOffices(d.offices);built=true;}
+    if(!built){built=true;buildCats(d.cats);buildOffices(d.offices);}
     renderList();
   }).catch(function(){})
 }
 function buildCats(cats){$('cats').innerHTML='<span class="chip on" data-c="">all</span>'+(cats||[]).map(function(c){return '<span class="chip" data-c="'+esc(c[0])+'">'+esc(c[0])+' '+c[1]+'</span>'}).join('');
   Array.prototype.forEach.call($('cats').children,function(ch){ch.onclick=function(){cat=ch.getAttribute('data-c');Array.prototype.forEach.call($('cats').children,function(x){x.classList.remove('on')});ch.classList.add('on');load();}});}
-function buildOffices(off){$('office').innerHTML='<option value="">all offices</option>'+(off||[]).map(function(o){return '<option value="'+esc(o[0])+'">'+esc(o[0])+' ('+o[1]+')</option>'}).join('');}
+function buildOffices(off){$('office').innerHTML='<option value="">all offices</option>'+(off||[]).map(function(o){return '<option value="'+esc(o[0])+'">'+esc(o[0])+' ('+o[1]+')</option>'}).join('');
+  $('office').value=office;
+  if($('office').value!==office){office='';$('office').value='';load();}}  // local office has no products yet -> fall back to all
 function renderList(){$('list').innerHTML=ITEMS.map(function(i){return '<div class="row" data-f="'+esc(i.file)+'"><time>'+clock(i.ts)+'</time><span class="cat">'+esc(i.cat)+'</span><span class="nm">'+(i.type==='graphic'?'\\uD83D\\uDDBC ':'')+esc(i.name)+'</span><span class="of">'+esc(i.office)+'</span></div>'}).join('')||'<div class="ph" style="padding:1rem">no products</div>';
   Array.prototype.forEach.call($('list').children,function(el){el.addEventListener('click',function(){view(el.getAttribute('data-f'),el)})});}
 function view(file,el){if(!file)return;
@@ -1027,7 +1031,7 @@ function view(file,el){if(!file)return;
   if(/\\.(gif|jpe?g|png)$/i.test(file)){$('view').innerHTML='<img src="'+url+'" alt="">';}
   else{fetch(url,{cache:'no-store'}).then(function(r){return r.text()}).then(function(t){$('view').innerHTML='<pre>'+esc(t)+'</pre>';}).catch(function(){$('view').innerHTML='<div class="ph">failed to load</div>';});}}
 $('q').addEventListener('input',function(){clearTimeout(window._t);window._t=setTimeout(load,300)});
-$('type').onchange=load;$('office').onchange=load;
+$('type').onchange=load;$('office').onchange=function(){office=$('office').value;load();};
 load();setInterval(load,60000);
 </script></body></html>"""
 
