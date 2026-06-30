@@ -284,9 +284,12 @@ def _ensure_overlay(relpath, layers=("states", "cities", "home")):
     try:
         if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(src):
             return os.path.relpath(out, ARCHIVE)
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        with Image.open(src) as im:
-            draw_overlay(im, cfg, 0, 0, layers).save(out)
+        with _GEN_SEM:                       # bound concurrent 5424² decodes
+            if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(src):
+                return os.path.relpath(out, ARCHIVE)
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            with Image.open(src) as im:
+                draw_overlay(im, cfg, 0, 0, layers).save(out)
         return os.path.relpath(out, ARCHIVE)
     except (OSError, ValueError) as e:
         log(f"overlay failed {src}: {e}")
@@ -296,6 +299,12 @@ def _ensure_overlay(relpath, layers=("states", "cities", "home")):
 # ---- archive index ---------------------------------------------------------
 _INDEX = {"captures": [], "scanned": 0.0, "src_mtime": -1.0}
 _ILOCK = threading.Lock()
+
+# Cap concurrent heavy image generation. ThreadingHTTPServer has no thread limit,
+# so a stampede of thumb/preview/anim requests (each decoding a ~88 MB Full-Disk
+# PNG or stacking N frames) can exhaust the LXC's RAM and OOM the container. This
+# bounds peak memory to ~N concurrent decodes regardless of request volume.
+_GEN_SEM = threading.BoundedSemaphore(int(os.environ.get("GOES_GEN_CONCURRENCY", "2")))
 
 
 def _dir_unix(name):
@@ -425,14 +434,17 @@ def _ensure_crop(capture, composite):
     try:
         if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(src):
             return rel
-        os.makedirs(out_dir, exist_ok=True)
-        with Image.open(src) as im:
-            crop = im.crop(CROP_BOX)
-            if OVERLAY_ON:
-                cfg = read_projection(os.path.join(ARCHIVE, capture["dir"]))
-                if cfg:
-                    crop = draw_overlay(crop, cfg, CROP_BOX[0], CROP_BOX[1])
-            crop.save(out)
+        with _GEN_SEM:                       # bound concurrent 5424² decodes
+            if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(src):
+                return rel                   # built by another thread while we waited
+            os.makedirs(out_dir, exist_ok=True)
+            with Image.open(src) as im:
+                crop = im.crop(CROP_BOX)
+                if OVERLAY_ON:
+                    cfg = read_projection(os.path.join(ARCHIVE, capture["dir"]))
+                    if cfg:
+                        crop = draw_overlay(crop, cfg, CROP_BOX[0], CROP_BOX[1])
+                crop.save(out)
         return rel
     except (OSError, ValueError) as e:
         log(f"crop failed {src}: {e}")
@@ -500,10 +512,13 @@ def _scaled(relpath, maxdim, subdir):
     try:
         if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(src):
             return out
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        with Image.open(src) as im:
-            im.thumbnail((maxdim, maxdim))
-            im.convert("RGB").save(out, "JPEG", quality=JPEG_Q, optimize=True)
+        with _GEN_SEM:                       # bound concurrent 5424² decodes
+            if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(src):
+                return out                   # built by another thread while we waited
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            with Image.open(src) as im:
+                im.thumbnail((maxdim, maxdim))
+                im.convert("RGB").save(out, "JPEG", quality=JPEG_Q, optimize=True)
         return out
     except (OSError, ValueError) as e:
         log(f"scale failed {src}: {e}")
@@ -705,21 +720,26 @@ def ensure_anim(group, comp, n, ms, fmt):
     try:
         if os.path.exists(out) and os.path.getmtime(out) >= latest:
             return out
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        frames = []
-        for p in previews:
-            with Image.open(p) as im:
-                f = im.convert("RGB")
-                f.thumbnail((ANIM_W, ANIM_W))
-                frames.append(f.copy())
-        if fmt == "gif":
-            base = frames[0].convert("P", palette=Image.ADAPTIVE, colors=256)
-            pal = [f.quantize(palette=base, dither=Image.FLOYDSTEINBERG) for f in frames]
-            pal[0].save(out, format="GIF", save_all=True, append_images=pal[1:],
-                        duration=ms, loop=0, optimize=True, disposal=2)
-        else:
-            frames[0].save(out, format="WEBP", save_all=True, append_images=frames[1:],
-                           duration=ms, loop=0, quality=72, method=4)
+        # Hold N frames in memory at once — bound concurrency (the ensure_preview
+        # calls above already released the semaphore, so no reentrancy here).
+        with _GEN_SEM:
+            if os.path.exists(out) and os.path.getmtime(out) >= latest:
+                return out
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            frames = []
+            for p in previews:
+                with Image.open(p) as im:
+                    f = im.convert("RGB")
+                    f.thumbnail((ANIM_W, ANIM_W))
+                    frames.append(f.copy())
+            if fmt == "gif":
+                base = frames[0].convert("P", palette=Image.ADAPTIVE, colors=256)
+                pal = [f.quantize(palette=base, dither=Image.FLOYDSTEINBERG) for f in frames]
+                pal[0].save(out, format="GIF", save_all=True, append_images=pal[1:],
+                            duration=ms, loop=0, optimize=True, disposal=2)
+            else:
+                frames[0].save(out, format="WEBP", save_all=True, append_images=frames[1:],
+                               duration=ms, loop=0, quality=72, method=4)
         return out
     except (OSError, ValueError) as e:
         log(f"anim {group}/{comp}: {e}")
