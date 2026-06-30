@@ -220,3 +220,10 @@ variable "ssh_private_key_path" {
   type        = string
   default     = "~/.ssh/id_ed25519"
 }
+
+# --- Dashboard tier (unified landing page, home.rg2.io) -----------------------
+variable "dashboard_ip" {
+  description = "Static IP of the dashboard LXC (vmid_base+6)"
+  type        = string
+  default     = "192.168.6.88"
+}

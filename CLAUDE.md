@@ -284,6 +284,25 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
 ## NPM proxy map (user-managed; TARGET state for the Android app — see
 ## deployment_notes "Android app integration")
 
+- `home.rg2.io` → **192.168.6.88:8080** (the unified platform landing page on the
+  NEW **dashboard** LXC — vmid 906, `modules/dashboard`). A stdlib-Python
+  `http.server` (`dashboard.py`) rendering one Material-Design-3 (dark) tile per
+  domain (Radio/Scanner/Satellite/Weather/ADS-B/Distribution): live status + rich
+  preview + a dive-in link. **WHY it aggregates server-side:** the page is HTTPS but
+  every backend status API is plain HTTP on the Server VLAN, so a browser can't
+  `fetch()` them (mixed-content) — a background thread polls them all and the page
+  reads ONE same-origin `/api/dashboard`. The GOES thumbnail is proxied via
+  `/api/proxy/goes-latest.png` (the gallery returns an absolute `https://goes.rg2.io`
+  URL → normalize to path, fetch via the internal `goes_base`); `/fm.mp3` plays from
+  the already-TLS `icecast.rg2.io`. Tile sources: radio `.84/api/stack-state`
+  (`streams[]` → FM freq + RDS title), scanner `.83:8081/api/status` + `/api/r2/state`
+  (`mode`), GOES `.85:8095/api/goes/latest` (`age_sec`), weather `.84:8090/api/alert`
+  (EAS) + HEAD `.87`, ADS-B `.86:8080/data/aircraft.json` (count + msg-rate delta),
+  Icecast `.82:8000/status-json.xsl` (mounts + listeners). Backend bases are env-tunable
+  (`/etc/dashboard/dashboard.env`, keep-if-absent). LIVE 2026-06-30: NPM host **#62**
+  (built fresh, not cloned) + LE cert **#77** (empty-meta POST `/api/nginx/certificates`
+  — note LE may transiently 500 "Service busy"; retry — then PUT `certificate_id` +
+  `ssl_forced`; do NOT clone, which carries the source's cert).
 - `icecast.rg2.io` → 192.168.6.82:8000 (rack Icecast — all public audio)
 - `scanner.rg2.io` → 192.168.6.83:8080 (op25 console; legacy page is the
   data-complete one under single-receiver rx.py)
