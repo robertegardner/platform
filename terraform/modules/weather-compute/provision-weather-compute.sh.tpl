@@ -36,6 +36,18 @@ else
     || echo "    WARN: weewx install failed — check the repo/suite at apply time"
 fi
 
+# --- 2b) py3.12 compat for the migrated Belchertown skin ---------------------
+# belchertown.py calls locale.format(), REMOVED in Python 3.12 (this LXC is noble
+# = 3.12; the Zero's 3.11 still has it). Without this the Belchertown report crashes
+# (AttributeError) and only Seasons renders. locale.format_string() has the same
+# signature. Idempotent — only bare `locale.format(` calls are touched, and it's a
+# no-op once patched / if the skin isn't migrated yet.
+BPY=/etc/weewx/bin/user/belchertown.py
+if [ -f "$BPY" ] && grep -q "locale\.format(" "$BPY"; then
+  sed -i 's/locale\.format(/locale.format_string(/g' "$BPY"
+  echo "    patched belchertown.py locale.format -> locale.format_string (py3.12)"
+fi
+
 # --- 3) NEVER run weewxd here — mask it (report-only box) ---------------------
 # weectl report run only fires reports; masking weewx.service makes it impossible
 # to accidentally start collection/uploads (which would double-publish vs the Zero).
@@ -106,9 +118,9 @@ WantedBy=timers.target
 EOF
 
 # --- 6) nginx — serve the Belchertown site -----------------------------------
-# Belchertown + Seasons both render under the weewx HTML_ROOT (/var/www/html/weewx,
-# the StdReport default in the migrated weewx.conf); the Belchertown index lands at
-# /var/www/html/weewx/index.html, so nginx's root is that dir (index at /).
+# Belchertown's HTML_ROOT is /var/www/html (the migrated weewx.conf), so its index
+# lands at /var/www/html/index.html — nginx's root is /var/www/html (Belchertown at
+# /; Seasons, at the default HTML_ROOT /var/www/html/weewx, is then at /weewx/).
 install -d -m 0755 /var/www/html/weewx
 if ! grep -s "weather-compute managed" /etc/nginx/sites-available/default >/dev/null 2>&1; then
   cat > /etc/nginx/sites-available/default <<'EOF'
@@ -116,13 +128,13 @@ if ! grep -s "weather-compute managed" /etc/nginx/sites-available/default >/dev/
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
-    root /var/www/html/weewx;
+    root /var/www/html;
     index index.html;
     server_name _;
     location / { try_files $uri $uri/ =404; }
 }
 EOF
-  echo "    wrote nginx default site (root /var/www/html/weewx)"
+  echo "    wrote nginx default site (root /var/www/html)"
 fi
 systemctl enable nginx >/dev/null 2>&1 || true
 systemctl restart nginx || echo "    WARN: nginx restart failed"
