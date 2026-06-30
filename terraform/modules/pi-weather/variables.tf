@@ -1,7 +1,7 @@
-# pi-weather — provisions the weather Pi Zero (weather2) as a THIN bridge: the
-# Davis Vantage console (Bluetooth rfcomm → /dev/rfcomm0) re-served as a raw
-# serial-over-TCP port (ser2net) for the rack weewx. The heavy weewx/report/web
-# load moves to the weather-compute LXC. Bare metal — never destroy/recreate.
+# pi-weather — provisions the weather Pi Zero (weather2) as the LOCAL Davis
+# collector. weewx keeps collecting + uploading here; the archive DB is replicated
+# to the weather-compute LXC via Litestream, which does report-gen + web. Bare
+# metal — never destroy/recreate.
 
 variable "weather_host" {
   description = "Hostname/IP of the weather Pi Zero (weather2)"
@@ -19,7 +19,7 @@ variable "ssh_private_key_path" {
 }
 
 variable "devices" {
-  description = "The weather-domain device subset (the Davis console / bridge)"
+  description = "The weather-domain device subset (the Davis console)"
   type        = any
 }
 
@@ -29,14 +29,32 @@ variable "console_mac" {
   default     = "00:1B:DC:50:05:DE"
 }
 
-variable "ser2net_port" {
-  description = "TCP port ser2net exposes /dev/rfcomm0 on (the Vantage serial)"
-  type        = number
-  default     = 3001
+variable "rack_host" {
+  description = "weather-compute LXC IP — Litestream SFTP-pushes the replica here"
+  type        = string
+  default     = "192.168.6.87"
+}
+
+variable "replica_path" {
+  description = "Path on the rack where Litestream writes the DB replica"
+  type        = string
+  default     = "/srv/weather-replica"
+}
+
+variable "db_path" {
+  description = "weewx SQLite archive DB on the Zero (the Litestream source)"
+  type        = string
+  default     = "/var/lib/weewx/weewx.sdb"
+}
+
+variable "litestream_version" {
+  description = "Litestream release to install (install-if-absent, arch-matched)"
+  type        = string
+  default     = "0.3.13"
 }
 
 variable "cutover" {
-  description = "false = install the bridge but leave it idle (local weewx keeps the console). true = perform the switch: stop local weewx + the 3 web servers, take over rfcomm, start ser2net. Flip to true only at the coordinated cutover."
+  description = "false = install Litestream idle (the Zero keeps reporting + serving locally). true = switch: DB->WAL, disable the on-Zero Belchertown+Seasons reports, stop the web servers, start Litestream replication. Collection + uploads are never moved (only paused ~seconds for the WAL switch)."
   type        = bool
   default     = false
 }

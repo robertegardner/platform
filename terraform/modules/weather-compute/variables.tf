@@ -1,6 +1,6 @@
-# weather-compute — rack LXC running weewx 5 (Davis Vantage via the Pi Zero's
-# serial-over-TCP bridge), the Belchertown + Seasons reports, the uploads
-# (Wunderground/CWOP/PWSweather/AWEKAS + MQTT), and nginx serving the public site
+# weather-compute — rack LXC, the REPORT-ONLY half of the weather2 fold. The Pi
+# Zero replicates its weewx archive DB here via Litestream; this box restores it +
+# runs the Belchertown + Seasons reports + serves the public site
 # (weather.bobgardner.org). Container pattern copied from modules/adsb-feeder.
 
 variable "vmid" {
@@ -65,14 +65,26 @@ variable "ssh_private_key_path" {
   type        = string
 }
 
-variable "weather_host" {
-  description = "The Pi Zero bridge (weather2) IP — weewx reads the Davis console via its ser2net TCP port"
+variable "replica_path" {
+  description = "Local path where the Zero's Litestream replica is SFTP-pushed + restored from"
   type        = string
-  default     = "192.168.6.32"
+  default     = "/srv/weather-replica"
 }
 
-variable "ser2net_port" {
-  description = "ser2net TCP port on the bridge that exposes /dev/rfcomm0 (the Davis console)"
+variable "db_path" {
+  description = "Where the restored weewx archive DB lands (read by weectl report run)"
+  type        = string
+  default     = "/var/lib/weewx/weewx.sdb"
+}
+
+variable "litestream_version" {
+  description = "Litestream release to install (install-if-absent, arch-matched)"
+  type        = string
+  default     = "0.3.13"
+}
+
+variable "report_interval_min" {
+  description = "Minutes between replica restore + report regeneration (live tiles are MQTT-real-time, so the full report can lag a few minutes)"
   type        = number
-  default     = 3001
+  default     = 10
 }

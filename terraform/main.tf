@@ -212,12 +212,12 @@ module "weather_compute" {
   bridge               = var.pve_bridge
   ssh_public_key       = var.ssh_public_key
   ssh_private_key_path = var.ssh_private_key_path
-
-  weather_host = var.weather_host
 }
 
-# Tier 1 (extra) — pi-weather: the Davis-console bridge on the Pi Zero (weather2).
-# `cutover` defaults false (stage the bridge idle; local weewx keeps the console).
+# Tier 1 (extra) — pi-weather: the LOCAL Davis collector on the Pi Zero (weather2).
+# weewx collection stays here; the archive DB replicates to weather-compute via
+# Litestream. `cutover` defaults false (install Litestream idle; nothing changes
+# live). Flip true to disable on-Zero reports + start replication.
 module "pi_weather" {
   source = "./modules/pi-weather"
 
@@ -225,5 +225,6 @@ module "pi_weather" {
   ssh_user             = var.weather_ssh_user
   ssh_private_key_path = var.ssh_private_key_path
   devices              = local.weather_devices
+  rack_host            = var.weather_compute_ip
   cutover              = var.weather_cutover
 }

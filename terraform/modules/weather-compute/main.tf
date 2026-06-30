@@ -1,9 +1,10 @@
-# Tier 3 (extra) — weather-compute: rack LXC running weewx 5 for the Davis Vantage
-# station (read over the Pi Zero's serial-over-TCP bridge), the Belchertown +
-# Seasons reports, the uploads (WU/CWOP/PWSweather/AWEKAS + MQTT), and nginx
-# serving the public site. Moves the heavy weewx/report/web load off the flaky Pi
-# Zero. Pattern copied from module.adsb-feeder / module.goes-archive. No
-# depends_on the pi-weather bridge (a down bridge is a runtime concern).
+# Tier 3 (extra) — weather-compute: rack LXC, the REPORT-ONLY half of the weather2
+# fold. The Pi Zero keeps collecting (Vantage DMPAFT only works over local BT
+# serial) and replicates its archive DB here via Litestream; this box restores a
+# faithful copy on a timer + runs `weectl report run` (Belchertown + Seasons) +
+# serves the site via nginx. weewxd is masked (never collects/uploads). Pattern
+# copied from module.adsb-feeder / module.goes-archive. No depends_on pi-weather
+# (a down collector/replica is a runtime concern).
 
 terraform {
   required_providers {
@@ -18,7 +19,7 @@ resource "proxmox_virtual_environment_container" "weather_compute" {
   vm_id     = var.vmid
   pool_id   = var.pool_name
 
-  description = "weewx 5 + Belchertown (weather.bobgardner.org) — managed by Terraform"
+  description = "weewx report-only + Belchertown (weather.bobgardner.org) — managed by Terraform"
   tags        = ["weather", "platform"]
 
   initialization {
@@ -111,8 +112,10 @@ resource "null_resource" "provision" {
 
 locals {
   provision_script = templatefile("${path.module}/provision-weather-compute.sh.tpl", {
-    weather_host = var.weather_host
-    ser2net_port = var.ser2net_port
+    replica_path        = var.replica_path
+    db_path             = var.db_path
+    litestream_version  = var.litestream_version
+    report_interval_min = var.report_interval_min
   })
 }
 
