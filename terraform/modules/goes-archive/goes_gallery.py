@@ -782,6 +782,84 @@ def ensure_anim(group, comp, n, ms, fmt):
         return None
 
 
+# ---- image-type descriptions ("what it's good for") ------------------------
+# Keyed by the composite display name (filename with abi_rgb_/.png stripped and
+# underscores -> spaces). Single source of truth; the viewer resolves per-image.
+COMPOSITE_DESC = {
+    "Clean Longwave IR Window Band":
+        "Workhorse infrared (10.3 µm): cloud-top temperature day & night. Cold (bright) "
+        "tops mean deeper convection. Least affected by water vapor.",
+    "Infrared Longwave Window Band":
+        "Longwave IR window (11.2 µm): cloud and surface temperature; pairs with the "
+        "'dirty' window for the split-window difference.",
+    "Dirty Longwave Window":
+        "12.3 µm 'dirty' window: with the clean window it flags dust, volcanic ash, and "
+        "low-level moisture.",
+    "Dirty Longwave Window - CIRA":
+        "CIRA 'dirty' longwave enhancement (12.3 µm) — tuned for dust, ash, and low-level "
+        "moisture via the split-window difference.",
+    "Shortwave Window Band":
+        "Shortwave IR (3.9 µm): fire and hot-spot detection, plus nighttime fog and low "
+        "cloud.",
+    "Mid-level Tropospheric Water Vapor":
+        "Mid-level moisture (6.9 µm): mid-tropospheric flow, jet streaks, and dynamics; "
+        "day & night.",
+    "Upper-Level Tropospheric Water Vapor":
+        "Upper-level moisture (6.2 µm): jet streams, dry slots, and upper-air circulation.",
+    "ABI False Color":
+        "Daytime false color: discriminates land, snow/ice, and cloud phase (daylight only).",
+    # L2 derived products (these also carry a colorbar legend in the viewer)
+    "AWG Cloud Height Algorithm (ACHA)":
+        "Cloud-top height (0–18 km): convective intensity, overshooting tops, aviation hazards.",
+    "Cloud top Temperature (ACHT)":
+        "Cloud-top temperature: the coldest tops mark the strongest, deepest storms.",
+    "Derived Stability Indices - CAPE":
+        "Convective Available Potential Energy (0–5000 J/kg): atmospheric instability and "
+        "severe-storm potential.",
+    "Land Surface Temperature":
+        "Land skin temperature: surface heating, frost/heat risk, and drought monitoring.",
+    "Sea Surface Temperature":
+        "Sea surface temperature: marine forecasting and tropical-cyclone potential.",
+    "Total Precipitable Water":
+        "Total column moisture (0–60 mm): atmospheric rivers and heavy-rain potential.",
+    "Rain Rate Per Quarter Hour":
+        "Satellite rain-rate estimate: instantaneous precipitation intensity.",
+}
+# Keyed by the ABI band number / L2 token parsed from a band filename (G19_13_…,
+# G19_ACHA_…). L2 tokens reuse the composite text so band & product views match.
+BAND_DESC = {
+    "2": "ABI Band 2 — red visible (0.64 µm): highest-res daytime view of clouds, smoke, "
+         "and fog (daylight only).",
+    "7": COMPOSITE_DESC["Shortwave Window Band"],
+    "8": COMPOSITE_DESC["Upper-Level Tropospheric Water Vapor"],
+    "9": COMPOSITE_DESC["Mid-level Tropospheric Water Vapor"],
+    "13": COMPOSITE_DESC["Clean Longwave IR Window Band"],
+    "14": COMPOSITE_DESC["Infrared Longwave Window Band"],
+    "15": COMPOSITE_DESC["Dirty Longwave Window"],
+    "ACHA": COMPOSITE_DESC["AWG Cloud Height Algorithm (ACHA)"],
+    "ACHT": COMPOSITE_DESC["Cloud top Temperature (ACHT)"],
+    "DSI": COMPOSITE_DESC["Derived Stability Indices - CAPE"],
+    "LST": COMPOSITE_DESC["Land Surface Temperature"],
+    "SST": COMPOSITE_DESC["Sea Surface Temperature"],
+    "TPW": COMPOSITE_DESC["Total Precipitable Water"],
+    "RRQPE": COMPOSITE_DESC["Rain Rate Per Quarter Hour"],
+}
+
+
+def describe_image(name):
+    """Resolve a composite/band filename to its 'what it's good for' blurb, or ''."""
+    n = name.replace(".png", "")
+    if n.startswith("abi_rgb_"):
+        n = n[len("abi_rgb_"):]
+    disp = re.sub(r"\s+", " ", n.replace("_", " ")).strip()
+    if disp in COMPOSITE_DESC:
+        return COMPOSITE_DESC[disp]
+    m = re.match(r"^G\d+_([A-Za-z0-9]+)_", name)   # band file -> token
+    if m:
+        return BAND_DESC.get(m.group(1).upper(), "")
+    return ""
+
+
 # ---- HTTP ------------------------------------------------------------------
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -822,7 +900,7 @@ dialog .dh select,dialog .dh button{background:#1a2433;color:var(--text);border:
 <div class="tabs" id="tabs"></div>
 <div class="grid" id="grid"><div class="empty">loading…</div></div>
 </div>
-<dialog id="dlg"><div class="dh"><select id="comp"></select><label class="dim" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="ovl">overlay</label><button id="loopbtn" class="dim" style="background:#1a2433;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:.2rem .55rem;cursor:pointer">&#9654; Loop</button><span id="loopctl" style="display:none;align-items:center;gap:.4rem"><input type="range" id="lframes" min="6" max="48" value="18" style="width:88px"><span class="dim" id="lframesn">18f</span><select id="lspeed" style="background:#0d1420;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:.15rem"><option value="400">slow</option><option value="250" selected>med</option><option value="120">fast</option></select><a class="dim" id="gifdl" style="text-decoration:underline">&#8595; GIF</a></span><a class="dim" id="full" target="_blank" rel="noopener" style="text-decoration:underline">full res &#8595;</a><span class="dim" id="dlgmeta"></span><button id="dlgx">close</button></div><img id="dlgimg" alt=""><div id="legend"></div></dialog>
+<dialog id="dlg"><div class="dh"><select id="comp"></select><label class="dim" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="ovl">overlay</label><button id="loopbtn" class="dim" style="background:#1a2433;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:.2rem .55rem;cursor:pointer">&#9654; Loop</button><span id="loopctl" style="display:none;align-items:center;gap:.4rem"><input type="range" id="lframes" min="6" max="48" value="18" style="width:88px"><span class="dim" id="lframesn">18f</span><select id="lspeed" style="background:#0d1420;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:.15rem"><option value="400">slow</option><option value="250" selected>med</option><option value="120">fast</option></select><a class="dim" id="gifdl" style="text-decoration:underline">&#8595; GIF</a></span><a class="dim" id="full" target="_blank" rel="noopener" style="text-decoration:underline">full res &#8595;</a><span class="dim" id="dlgmeta"></span><button id="dlgx">close</button></div><div id="desc" style="color:var(--dim);font-size:.84rem;padding:.1rem .2rem .5rem;max-width:70ch"></div><img id="dlgimg" alt=""><div id="legend"></div></dialog>
 <script>
 var $=function(i){return document.getElementById(i)};var IMG="/api/goes/image/";
 var GROUPS=[];var cur=null;var CAPS=[];
@@ -860,7 +938,8 @@ function open(id){var c=CAPS.find(function(x){return x.id===id});if(!c)return;
     $('loopbtn').innerHTML=on?'&#10073;&#10073; Still':'&#9654; Loop';$('ovl').parentNode.style.opacity=on?'.4':'1';show();}
   $('loopbtn').onclick=function(){setLoop(!looping)};
   $('lframes').oninput=function(){if(looping)show()};$('lspeed').onchange=function(){if(looping)show()};
-  $('comp').value=c.preferred||opts[0];setLoop(false);$('comp').onchange=show;$('ovl').onchange=show;
+  function loadDesc(){fetch('/api/goes/describe?comp='+encodeURIComponent($('comp').value),{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){$('desc').textContent=d.desc||'';}).catch(function(){$('desc').textContent=''})}
+  $('comp').value=c.preferred||opts[0];setLoop(false);loadDesc();$('comp').onchange=function(){show();loadDesc()};$('ovl').onchange=show;
   $('legend').innerHTML='';
   fetch('/api/goes/legend?group='+encodeURIComponent(c.group||''),{cache:'no-store'}).then(function(r){return r.json()}).then(function(g){
     if(!g||!g.colors)return;
@@ -1067,6 +1146,8 @@ class Handler(BaseHTTPRequestHandler):
                              "total": len(caps), "preferred": PREFERRED})
         elif path == "/api/goes/legend":
             self._json(200, legend_for_group(params.get("group", "")) or {})
+        elif path == "/api/goes/describe":
+            self._json(200, {"desc": describe_image(params.get("comp", ""))})
         elif path == "/api/goes/anim":
             try:
                 n = int(params.get("n", "18")); ms = int(params.get("ms", "250"))
