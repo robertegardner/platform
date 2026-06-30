@@ -702,6 +702,11 @@ def legend_for_group(group):
 # ---- animated loops (WebP + GIF) -------------------------------------------
 ANIM_W = int(os.environ.get("GOES_ANIM_W", "1100"))      # loop frame max dimension
 ANIM_MAXN = int(os.environ.get("GOES_ANIM_MAXN", "48"))
+# The shareable GIF is downloaded cold/synchronously, so keep it small + fast to
+# generate (full-size GIFs hit ~20s/31MB and clients time out → 0-byte download).
+# The on-screen WebP loop keeps full ANIM_W/ANIM_MAXN.
+GIF_W = int(os.environ.get("GOES_GIF_W", "720"))         # gif frame max dimension
+GIF_MAXN = int(os.environ.get("GOES_GIF_MAXN", "24"))    # cap gif frame count
 
 try:
     from zoneinfo import ZoneInfo
@@ -740,13 +745,29 @@ def _stamp_frame(frame, ts):
 
 
 def _anim_sources(group, comp, n):
-    """Most-recent-N (group, composite) frames, oldest->newest, as (relpath, ts)."""
-    caps = [c for c in get_index() if c["group"] == group][:max(2, min(ANIM_MAXN, n))]
+    """Most-recent-N (group, composite) frames, oldest->newest, as (relpath, ts).
+
+    With a specific composite requested, ONLY captures that actually contain it are
+    used — captures missing it are SKIPPED, not substituted with their preferred
+    composite. Otherwise a recent capture that hasn't acquired this composite yet
+    would drop a different image category into the loop and disrupt it."""
+    limit = max(2, min(ANIM_MAXN, n))
     out = []
-    for c in reversed(caps):                       # oldest -> newest = forward play
-        use = comp if comp and (comp in c["composites"] or comp in c["bands"]) else c.get("preferred")
-        if use:
-            out.append((os.path.join(c["dir"], use), c["timestamp"]))
+    for c in get_index():                          # newest first
+        if c["group"] != group:
+            continue
+        if comp:
+            if comp not in c["composites"] and comp not in c["bands"]:
+                continue                           # skip — keep the loop one category
+            use = comp
+        else:
+            use = c.get("preferred")
+        if not use:
+            continue
+        out.append((os.path.join(c["dir"], use), c["timestamp"]))
+        if len(out) >= limit:
+            break
+    out.reverse()                                  # oldest -> newest = forward play
     return out
 
 
@@ -758,39 +779,52 @@ def ensure_anim(group, comp, n, ms, fmt):
     # keep (preview, ts) pairs that resolved
     pv = [(ensure_preview(r), ts) for r, ts in srcs]
     pv = [(p, ts) for p, ts in pv if p]
+    if fmt == "gif" and len(pv) > GIF_MAXN:        # cap gif length (most-recent N)
+        pv = pv[-GIF_MAXN:]
     if len(pv) < 2:
         return None
     latest = max(os.path.getmtime(p) for p, _ in pv)
     safe = (group + "_" + (comp or "pref")).replace("/", "_").replace(" ", "_").replace("·", "-")
     out = os.path.join(DERIVED, "anim", f"{safe}_n{len(pv)}_ms{ms}_ts.{fmt}")
     try:
-        if os.path.exists(out) and os.path.getmtime(out) >= latest:
+        # getsize > 0 so a stray 0-byte file (e.g. from an older interrupted gen)
+        # is never served — it's regenerated instead.
+        if os.path.exists(out) and os.path.getsize(out) > 0 and os.path.getmtime(out) >= latest:
             return out
         # Hold N frames in memory at once — bound concurrency (the ensure_preview
         # calls above already released the semaphore, so no reentrancy here).
         with _GEN_SEM:
-            if os.path.exists(out) and os.path.getmtime(out) >= latest:
+            if os.path.exists(out) and os.path.getsize(out) > 0 and os.path.getmtime(out) >= latest:
                 return out
             os.makedirs(os.path.dirname(out), exist_ok=True)
+            box = GIF_W if fmt == "gif" else ANIM_W
             frames = []
             for p, ts in pv:
                 with Image.open(p) as im:
                     f = im.convert("RGB")
-                    f.thumbnail((ANIM_W, ANIM_W))
+                    f.thumbnail((box, box))
                     f = f.copy()
                     _stamp_frame(f, ts)
                     frames.append(f)
+            # Write to a temp file then atomically rename, so a slow/failed/
+            # interrupted gen never leaves a partial or 0-byte file in the cache.
+            tmp = out + ".tmp"
             if fmt == "gif":
                 base = frames[0].convert("P", palette=Image.ADAPTIVE, colors=256)
                 pal = [f.quantize(palette=base, dither=Image.FLOYDSTEINBERG) for f in frames]
-                pal[0].save(out, format="GIF", save_all=True, append_images=pal[1:],
+                pal[0].save(tmp, format="GIF", save_all=True, append_images=pal[1:],
                             duration=ms, loop=0, optimize=True, disposal=2)
             else:
-                frames[0].save(out, format="WEBP", save_all=True, append_images=frames[1:],
+                frames[0].save(tmp, format="WEBP", save_all=True, append_images=frames[1:],
                                duration=ms, loop=0, quality=72, method=4)
+            os.replace(tmp, out)
         return out
-    except (OSError, ValueError) as e:
-        log(f"anim {group}/{comp}: {e}")
+    except Exception as e:  # noqa: BLE001 — never crash the handler or leave a partial
+        log(f"anim {group}/{comp} {fmt}: {e}")
+        try:
+            os.remove(out + ".tmp")
+        except OSError:
+            pass
         return None
 
 
@@ -912,7 +946,7 @@ dialog .dh select,dialog .dh button{background:#1a2433;color:var(--text);border:
 <div class="tabs" id="tabs"></div>
 <div class="grid" id="grid"><div class="empty">loading…</div></div>
 </div>
-<dialog id="dlg"><div class="dh"><select id="comp"></select><label class="dim" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="ovl">overlay</label><button id="loopbtn" class="dim" style="background:#1a2433;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:.2rem .55rem;cursor:pointer">&#9654; Loop</button><span id="loopctl" style="display:none;align-items:center;gap:.4rem"><input type="range" id="lframes" min="6" max="48" value="18" style="width:88px"><span class="dim" id="lframesn">18f</span><select id="lspeed" style="background:#0d1420;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:.15rem"><option value="400">slow</option><option value="250" selected>med</option><option value="120">fast</option></select><a class="dim" id="gifdl" style="text-decoration:underline">&#8595; GIF</a></span><a class="dim" id="full" target="_blank" rel="noopener" style="text-decoration:underline">full res &#8595;</a><span class="dim" id="dlgmeta"></span><button id="dlgx">close</button></div><div id="desc" style="color:var(--dim);font-size:.84rem;padding:.1rem .2rem .5rem;max-width:70ch"></div><img id="dlgimg" alt=""><div id="legend"></div></dialog>
+<dialog id="dlg"><div class="dh"><select id="comp"></select><label class="dim" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="ovl">overlay</label><button id="loopbtn" class="dim" style="background:#1a2433;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:.2rem .55rem;cursor:pointer">&#9654; Loop</button><span id="loopctl" style="display:none;align-items:center;gap:.4rem"><input type="range" id="lframes" min="6" max="48" value="18" style="width:88px"><span class="dim" id="lframesn">18f</span><select id="lspeed" style="background:#0d1420;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:.15rem"><option value="400">slow</option><option value="250" selected>med</option><option value="120">fast</option></select><a class="dim" id="gifdl" download="goes-loop.gif" style="text-decoration:underline">&#8595; GIF</a></span><a class="dim" id="full" target="_blank" rel="noopener" style="text-decoration:underline">full res &#8595;</a><span class="dim" id="dlgmeta"></span><button id="dlgx">close</button></div><div id="desc" style="color:var(--dim);font-size:.84rem;padding:.1rem .2rem .5rem;max-width:70ch"></div><img id="dlgimg" alt=""><div id="legend"></div></dialog>
 <script>
 var $=function(i){return document.getElementById(i)};var IMG="/api/goes/image/";
 var GROUPS=[];var cur=null;var CAPS=[];
@@ -1069,7 +1103,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", f"public, max-age={max_age}")
         self._cors()
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass    # client closed mid-transfer (common on big GIF downloads)
 
     def _html(self, body):
         b = body.encode()
