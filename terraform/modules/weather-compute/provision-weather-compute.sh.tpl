@@ -20,6 +20,15 @@ apt-get update -qq
 apt-get install -y wget gnupg dirmngr nginx rsync sqlite3 python3-paho-mqtt python3-setuptools >/dev/null 2>&1 \
   || echo "    WARN: base package install failed"
 
+# --- 1b) Timezone = America/Chicago (Cape Girardeau, Central) -----------------
+# weectl report run renders timestamps in the system TZ, and Belchertown bakes the
+# resulting UTC offset into the page (tzAdjustedMoment). A UTC LXC makes the site
+# show times ~5h in the future + confuses the live-tile freshness logic. Set it to
+# the station's zone (DST-aware) so the embedded offset is correct year-round.
+ln -sf /usr/share/zoneinfo/America/Chicago /etc/localtime
+echo "America/Chicago" > /etc/timezone
+echo "    timezone: $(date '+%Z %z')"
+
 # --- 2) weewx 5 from the weewx apt repo (for the skins + weectl report run) ---
 if command -v weewxd >/dev/null 2>&1 || dpkg -l weewx >/dev/null 2>&1; then
   echo "    weewx present: $(weewxd --version 2>/dev/null)"
