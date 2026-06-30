@@ -810,10 +810,17 @@ def ensure_anim(group, comp, n, ms, fmt):
             # interrupted gen never leaves a partial or 0-byte file in the cache.
             tmp = out + ".tmp"
             if fmt == "gif":
+                # Quantize all frames to one shared palette, fully OPAQUE. With
+                # optimize=True + disposal=2, Pillow assigns a transparency index
+                # for inter-frame deltas that coincides with black — so black (the
+                # static off-disk space) rendered transparent. optimize=False +
+                # disposal=1 + stripping any transparency keeps black solid black.
                 base = frames[0].convert("P", palette=Image.ADAPTIVE, colors=256)
                 pal = [f.quantize(palette=base, dither=Image.FLOYDSTEINBERG) for f in frames]
+                for fr in pal:
+                    fr.info.pop("transparency", None)
                 pal[0].save(tmp, format="GIF", save_all=True, append_images=pal[1:],
-                            duration=ms, loop=0, optimize=True, disposal=2)
+                            duration=ms, loop=0, optimize=False, disposal=1)
             else:
                 frames[0].save(tmp, format="WEBP", save_all=True, append_images=frames[1:],
                                duration=ms, loop=0, quality=72, method=4)
