@@ -17,7 +17,7 @@ echo "==> weather-compute on $(hostname) — report-only weewx (restore $${REPLI
 
 # --- 1) Base packages (the Ubuntu LXC template ships no curl/wget/gnupg) ------
 apt-get update -qq
-apt-get install -y wget gnupg dirmngr nginx rsync sqlite3 python3-paho-mqtt python3-setuptools locales >/dev/null 2>&1 \
+apt-get install -y wget gnupg dirmngr nginx rsync sqlite3 python3-paho-mqtt python3-setuptools locales imagemagick >/dev/null 2>&1 \
   || echo "    WARN: base package install failed"
 
 # --- 1a) A REAL locale (the LXC default LANG=C is load-bearing) ---------------
@@ -165,6 +165,53 @@ systemctl daemon-reload
 systemctl enable weather-report.timer >/dev/null 2>&1 || true
 systemctl restart weather-report.timer || true
 echo "    weather-report.timer: $(systemctl is-active weather-report.timer 2>/dev/null) (every ${report_interval_min}m)"
+
+# --- 8) Local webcam snapshots (the Zero's getpix.sh, folded onto the rack) ---
+# The Belchertown page embeds local camera snapshots from the 192.168.90.x camera
+# VLAN (the rack can route to it). On the Zero these came from a getpix.sh cron;
+# here a timer fetches them into the web root. KEEP-IF-ABSENT (camera IPs are
+# hand-set) so on-box edits survive a re-apply.
+if [ ! -f /usr/local/sbin/weather-webcam.sh ]; then
+  cat > /usr/local/sbin/weather-webcam.sh <<'SH'
+#!/usr/bin/env bash
+# platform-managed (weather-compute): fetch local webcam snapshots for the site.
+# Edit the camera URLs / output names here if they change.
+set -uo pipefail
+D=/var/www/html/images; T=$(mktemp -d); install -d "$D"
+get(){ wget -q --no-check-certificate -T 12 -O "$T/s.jpeg" "$1"; }
+get https://192.168.90.218/snap.jpeg && convert "$T/s.jpeg" "$D/lastimage.png" || echo "cam 218 (lastimage) failed"
+get https://192.168.90.205/snap.jpeg && convert "$T/s.jpeg" "$D/backyard.png"  || echo "cam 205 (backyard) failed"
+get https://192.168.90.131/snap.jpeg && cp "$T/s.jpeg" "$D/driveway.jpeg"       || echo "cam 131 (driveway) failed"
+rm -rf "$T"
+SH
+  chmod +x /usr/local/sbin/weather-webcam.sh
+  echo "    wrote /usr/local/sbin/weather-webcam.sh"
+fi
+cat > /etc/systemd/system/weather-webcam.service <<'EOF'
+[Unit]
+Description=Fetch local webcam snapshots for the weather site
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/weather-webcam.sh
+EOF
+cat > /etc/systemd/system/weather-webcam.timer <<'EOF'
+[Unit]
+Description=Fetch webcam snapshots periodically
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=20s
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable weather-webcam.timer >/dev/null 2>&1 || true
+systemctl restart weather-webcam.timer || true
+# The migrated Belchertown hook hard-codes http://weather.bobgardner.org/images/...
+# for the cams — mixed content (blocked) on the HTTPS site. Make them root-relative.
+HOOK=/etc/weewx/skins/Belchertown/index_hook_after_station_info.inc
+[ -f "$HOOK" ] && sed -i 's#http://weather\.bobgardner\.org/images/#/images/#g' "$HOOK" \
+  && echo "    webcam refs in the Belchertown hook made root-relative"
 
 echo "==> weather-compute prepped. CUTOVER (manual/coordinated): migrate /etc/weewx"
 echo "    (conf + skins + bin/user) from the Zero IF not already staged, authorise the"
