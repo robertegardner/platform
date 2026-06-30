@@ -82,7 +82,7 @@ whole thing up.
   the local NWR tx (**162.550**, ~60 dB on the HF+ whip) → continuous `/wx.mp3`
   (`sdr-source@hf-plus` :55002; SoapyAirspyHF built by the pi provisioner). The
   HF+'s eventual AM-broadcast role (dx-R2 long-wire today) is deferred. **ATC
-  airband** is on-demand on the R2 (preempts P25; see the ems.rg2.io NPM entry).
+  airband** is on-demand on the R2 (preempts NOAA, the default; see the ems.rg2.io NPM entry).
   **Still waiting:** RTL v4 (Meteor/NOAA path is DARK — dipole + Sawbird were
   pulled to the attic; wxsat-scheduler paused), and the HF+ YouLoop. Before any
   >5 Msps stream into an LXC: raise `net.core.{r,w}mem_max` on **thebeast** (host
@@ -331,11 +331,19 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   app's scanner backend; deployed from the scanner repo). Also serves a human
   **EMS captions UI at `/`** (live caption + transcript log from
   scanner-transcribe, via `/api/transcribe` + `/api/transcript`); JSON service
-  descriptor moved to `/api`. The UI also has an **ATC airband control** (preset
-  freqs + manual MHz + start/stop) driving `/api/atc/*` → `atc-listen@<freq>`
-  (on-demand AM on the R2, **preempts P25**, auto-returns after 10 min →
-  `/scanner-atc.mp3`). NEVER point it at the Pi's old scheduler — its
-  MOSWIN job USB-resets the dongle out from under sdr-source@rtl-2838.
+  descriptor moved to `/api`. The page `/` is a **mode-centric scanner UI**
+  (2026-06-30 redesign, scanner repo `v2/scanner_api.py` `CAPTIONS_HTML`): a
+  `NOAA · default / P25 / ATC` segmented switcher reading `/api/r2/state` (active =
+  green dot), with a per-mode panel — **NOAA** `/wx.mp3` player; **P25** live
+  talkgroup (`/api/status`) + `/ems.mp3` player + captions + the **op25 console
+  embedded in-page** (iframe of scanner.rg2.io, shown ONLY when `mode==p25` so it
+  never 502s) + a fullscreen popout; **ATC** the amber-LCD airband tuner
+  (`/api/monitor/{tune,stop}`). One click POSTs `/api/r2/mode {mode}` (P25/NOAA) or
+  tunes (ATC) → `r2-mode.sh`, with a "switching ~15s" state. ATC/airband
+  **preempts NOAA** (the 24/7 default), NOT P25. The retired per-freq
+  `atc-listen@<freq>` / `/api/atc/*` path is GONE (superseded by `monitor.service`
+  via the coordinator; the provisioner removes the old units). NEVER point it at
+  the Pi's old scheduler — its MOSWIN job USB-resets the dongle.
 - `wx.rg2.io` → **192.168.6.84:8090** (`wx-alert.service` on radio-compute — a
   NOAA Weather Radio page: `/wx.mp3` player + a live **SAME/EAS alert banner**.
   Decodes alerts off `/wx.mp3` (`ffmpeg | multimon-ng -a EAS`); on an alert fires
@@ -400,8 +408,9 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
 - `ems.rg2.io` now serves the **V1-style amber-LCD tuner** at `/` (NFM/AM presets
   NOAA WX/Marine/EMS/KCGI-Tower-125.525/Memphis-Center, squelch, direct tune) →
   `/api/monitor/{tune,stop}` → `monitor.service` (NFM/AM on the R2, **preempts
-  P25**, auto-returns after 30 min → `/scanner-atc.mp3`). Supersedes the
-  per-freq `atc-listen@` template.
+  NOAA** the 24/7 default, auto-returns after 30 min → `/scanner-atc.mp3`).
+  Supersedes the per-freq `atc-listen@` template. (This is the ATC panel of the
+  mode-centric UI — see the `ems.rg2.io` entry above.)
 - `p25.rg2.io` → radio.srvr:8081 (the V1 scanner UI in READ-ONLY mode:
   /listen plays the live op25 feed with captions + the V1 archive pages.
   `SCANNER_UI_READONLY=true` makes it proxy the .83 bridge — it cannot
