@@ -4,7 +4,38 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
-## 2026-06-30 (latest) — weather2 (Davis Vantage) folded into the platform
+## 2026-06-30 (latest) — unified platform dashboard (`home.rg2.io`)
+
+**State: LIVE at `https://home.rg2.io` (applied 2026-06-30).** New
+`modules/dashboard` LXC (vmid 906 / 192.168.6.88) serving the
+unified landing page: a stdlib-Python `http.server` (`dashboard.py`) rendering one
+Material-Design-3 (dark) tile per domain — Radio / Scanner / Satellite / Weather /
+ADS-B / Distribution — each with live status, a rich preview, and a dive-in link.
+
+- **Server-side aggregation** (the load-bearing decision): the page is HTTPS but
+  every backend status API is plain HTTP on the Server VLAN → a browser `fetch()`
+  would mixed-content-block. So a background thread polls all backends and the page
+  reads ONE same-origin `/api/dashboard`. GOES thumbnail proxied via
+  `/api/proxy/goes-latest.png` (latest returns an absolute `https://goes.rg2.io` URL
+  → normalize to path → fetch via internal `goes_base`); `/fm.mp3` plays from
+  already-TLS `icecast.rg2.io`.
+- **Validated against LIVE backends from codeserver** (they're reachable): radio
+  `streams[]` → "FM 100.7 ♪ <RDS title> · N listening"; scanner `r2/state.mode` →
+  "ATC airband / monitoring · idle"; GOES `age_sec` + free GB; ADS-B count +
+  msg-rate delta; Icecast mount/listener chips; wx `/api/alert` EAS banner. All six
+  tiles populated; image proxy served 59 KB png.
+- Module copied from `goes-archive` (container + hashed-trigger provisioner +
+  keep-if-absent `/etc/dashboard/dashboard.env`). Wired into `main.tf`
+  (`var.vmid_base + 6`), new `var.dashboard_ip` (.88). `home.rg2.io` added to the
+  CLAUDE.md NPM map.
+- **APPLIED:** `terraform apply -target=module.dashboard` on thebeast (2 added, 0
+  changed) → LXC 906 up, `dashboard.service` active. NPM host **#62** `home.rg2.io`
+  → `.88:8080` created fresh (not cloned) + LE cert **#77** issued (empty-meta POST;
+  LE first 500'd "Service busy" then succeeded on retry), `certificate_id` PUT +
+  `ssl_forced`/`hsts`. Verified: HTTPS 200, all 6 tiles ok, http→https 301. ADS-B
+  `/data/aircraft.json` confirmed live (count + msg-rate delta render).
+
+## 2026-06-30 — weather2 (Davis Vantage) folded into the platform
 
 **State: LIVE + merged (`446b652`). weewx COLLECTION stays on the Pi Zero — the
 Vantage DMPAFT archive download only works over the local BT serial (it fails

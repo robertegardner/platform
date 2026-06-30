@@ -284,6 +284,25 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
 ## NPM proxy map (user-managed; TARGET state for the Android app — see
 ## deployment_notes "Android app integration")
 
+- `home.rg2.io` → **192.168.6.88:8080** (the unified platform landing page on the
+  NEW **dashboard** LXC — vmid 906, `modules/dashboard`). A stdlib-Python
+  `http.server` (`dashboard.py`) rendering one Material-Design-3 (dark) tile per
+  domain (Radio/Scanner/Satellite/Weather/ADS-B/Distribution): live status + rich
+  preview + a dive-in link. **WHY it aggregates server-side:** the page is HTTPS but
+  every backend status API is plain HTTP on the Server VLAN, so a browser can't
+  `fetch()` them (mixed-content) — a background thread polls them all and the page
+  reads ONE same-origin `/api/dashboard`. The GOES thumbnail is proxied via
+  `/api/proxy/goes-latest.png` (the gallery returns an absolute `https://goes.rg2.io`
+  URL → normalize to path, fetch via the internal `goes_base`); `/fm.mp3` plays from
+  the already-TLS `icecast.rg2.io`. Tile sources: radio `.84/api/stack-state`
+  (`streams[]` → FM freq + RDS title), scanner `.83:8081/api/status` + `/api/r2/state`
+  (`mode`), GOES `.85:8095/api/goes/latest` (`age_sec`), weather `.84:8090/api/alert`
+  (EAS) + HEAD `.87`, ADS-B `.86:8080/data/aircraft.json` (count + msg-rate delta),
+  Icecast `.82:8000/status-json.xsl` (mounts + listeners). Backend bases are env-tunable
+  (`/etc/dashboard/dashboard.env`, keep-if-absent). LIVE 2026-06-30: NPM host **#62**
+  (built fresh, not cloned) + LE cert **#77** (empty-meta POST `/api/nginx/certificates`
+  — note LE may transiently 500 "Service busy"; retry — then PUT `certificate_id` +
+  `ssl_forced`; do NOT clone, which carries the source's cert).
 - `icecast.rg2.io` → 192.168.6.82:8000 (rack Icecast — all public audio)
 - `scanner.rg2.io` → 192.168.6.83:8080 (op25 console; legacy page is the
   data-complete one under single-receiver rx.py)
@@ -321,7 +340,16 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   NOAA Weather Radio page: `/wx.mp3` player + a live **SAME/EAS alert banner**.
   Decodes alerts off `/wx.mp3` (`ffmpeg | multimon-ng -a EAS`); on an alert fires
   a webhook (`HA_WEBHOOK_URL` in `wx-alert.env` → Home Assistant, for house
-  speakers/push) + logs. NPM host created (clone of radio.rg2.io). DNS resolves
+  speakers/push) + logs. **ALSO polls api.weather.gov** (`nws_poll_loop`, every
+  `WX_NWS_POLL_SEC`=120s, point `WX_NWS_POINT`) for alerts ACTIVE over the home
+  point, filtered to the active county set — this catches LONG-FUSE events that
+  carry NO dedicated SAME tone on the NWR (heat/air-quality/some flood-wind; e.g.
+  an Extreme Heat Warning has SAME eventCode `NWS`, so the audio decoder never
+  hears it). NWS-sourced alerts are tagged `source:nws`, tier from NWS severity,
+  and are **DISPLAY-ONLY (no webhook)** — the on-air SAME burst stays the house
+  trigger; a still-valid SAME alert of ≥ tier wins ties. This is what flows the
+  active alert to the dashboard weather tile (which reads `/api/alert`). NPM host
+  created (clone of radio.rg2.io). DNS resolves
   via the `*.rg2.io` wildcard, but **needs a per-domain TLS cert** (cloned host
   serves radio.rg2.io's cert). `POST /api/test` injects a test alert. The HA
   webhook needs a non-default `User-Agent` — Cloudflare 403s `Python-urllib`.

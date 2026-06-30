@@ -214,6 +214,35 @@ module "weather_compute" {
   ssh_private_key_path = var.ssh_private_key_path
 }
 
+# Tier 3 (extra) — dashboard LXC: the unified platform landing page (home.rg2.io).
+# Polls every other service's status API server-side (HTTPS->HTTP mixed-content
+# would block a browser fetch) and renders one MD3 tile per domain. No depends_on
+# the other modules: a down backend is a runtime concern (the tile shows offline).
+module "dashboard" {
+  source = "./modules/dashboard"
+
+  vmid                 = var.vmid_base + 6
+  ip                   = var.dashboard_ip
+  prefix               = var.prefix
+  gw                   = var.gw_server
+  vlan_id              = var.vlan_server
+  node                 = var.pm_node
+  storage              = var.lxc_storage
+  template             = var.lxc_template
+  bridge               = var.pve_bridge
+  ssh_public_key       = var.ssh_public_key
+  ssh_private_key_path = var.ssh_private_key_path
+
+  # Backend bases track the existing *_ip vars so a renumber stays consistent.
+  radio_base   = "http://${var.radio_compute_ip}:8080"
+  scanner_base = "http://${var.scanner_compute_ip}:8081"
+  goes_base    = "http://${var.goes_archive_ip}:8095"
+  wx_base      = "http://${var.radio_compute_ip}:8090"
+  weather_base = "http://${var.weather_compute_ip}"
+  adsb_base    = "http://${var.adsb_feeder_ip}:8080"
+  icecast_base = "http://${var.distribution_ip}:8000"
+}
+
 # Tier 1 (extra) — pi-weather: the LOCAL Davis collector on the Pi Zero (weather2).
 # weewx collection stays here; the archive DB replicates to weather-compute via
 # Litestream. `cutover` defaults false (install Litestream idle; nothing changes
