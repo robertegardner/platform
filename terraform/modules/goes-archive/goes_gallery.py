@@ -691,32 +691,66 @@ def legend_for_group(group):
 ANIM_W = int(os.environ.get("GOES_ANIM_W", "1100"))      # loop frame max dimension
 ANIM_MAXN = int(os.environ.get("GOES_ANIM_MAXN", "48"))
 
+try:
+    from zoneinfo import ZoneInfo
+    _ANIM_TZ = ZoneInfo(os.environ.get("GOES_TZ", "America/Chicago"))
+except Exception:                                # no tzdata -> fixed CDT offset
+    from datetime import timedelta
+    _ANIM_TZ = timezone(timedelta(hours=-5))
+_FONT_CACHE = {}
+
+
+def _anim_font(px):
+    f = _FONT_CACHE.get(px)
+    if f is None:
+        for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
+            try:
+                f = ImageFont.truetype(path, px); break
+            except OSError:
+                continue
+        if f is None:
+            f = ImageFont.load_default()
+        _FONT_CACHE[px] = f
+    return f
+
+
+def _stamp_frame(frame, ts):
+    """Burn a CDT timestamp into the bottom-left of a loop frame (white text with a
+    black outline — legible over any imagery)."""
+    label = datetime.fromtimestamp(ts, _ANIM_TZ).strftime("%b %-d  %H:%M %Z")
+    d = ImageDraw.Draw(frame)
+    px = max(14, int(frame.height * 0.035))
+    font = _anim_font(px)
+    margin = int(px * 0.55)
+    d.text((margin, frame.height - px - margin), label, font=font,
+           fill=(255, 255, 255), stroke_width=max(2, px // 11), stroke_fill=(0, 0, 0))
+
 
 def _anim_sources(group, comp, n):
-    """Most-recent-N (group, composite) original relpaths, oldest->newest."""
+    """Most-recent-N (group, composite) frames, oldest->newest, as (relpath, ts)."""
     caps = [c for c in get_index() if c["group"] == group][:max(2, min(ANIM_MAXN, n))]
-    rels = []
+    out = []
     for c in reversed(caps):                       # oldest -> newest = forward play
         use = comp if comp and (comp in c["composites"] or comp in c["bands"]) else c.get("preferred")
         if use:
-            rels.append(os.path.join(c["dir"], use))
-    return rels
+            out.append((os.path.join(c["dir"], use), c["timestamp"]))
+    return out
 
 
 def ensure_anim(group, comp, n, ms, fmt):
     """Build (and cache) an animated WebP/GIF loop from the recent frames. Frames
     come from the cached previews (fast) downscaled to ANIM_W."""
     fmt = "gif" if fmt == "gif" else "webp"
-    rels = _anim_sources(group, comp, n)
-    if len(rels) < 2:
+    srcs = _anim_sources(group, comp, n)
+    # keep (preview, ts) pairs that resolved
+    pv = [(ensure_preview(r), ts) for r, ts in srcs]
+    pv = [(p, ts) for p, ts in pv if p]
+    if len(pv) < 2:
         return None
-    previews = [ensure_preview(r) for r in rels]
-    previews = [p for p in previews if p]
-    if len(previews) < 2:
-        return None
-    latest = max(os.path.getmtime(p) for p in previews)
+    latest = max(os.path.getmtime(p) for p, _ in pv)
     safe = (group + "_" + (comp or "pref")).replace("/", "_").replace(" ", "_").replace("·", "-")
-    out = os.path.join(DERIVED, "anim", f"{safe}_n{len(previews)}_ms{ms}.{fmt}")
+    out = os.path.join(DERIVED, "anim", f"{safe}_n{len(pv)}_ms{ms}_ts.{fmt}")
     try:
         if os.path.exists(out) and os.path.getmtime(out) >= latest:
             return out
@@ -727,11 +761,13 @@ def ensure_anim(group, comp, n, ms, fmt):
                 return out
             os.makedirs(os.path.dirname(out), exist_ok=True)
             frames = []
-            for p in previews:
+            for p, ts in pv:
                 with Image.open(p) as im:
                     f = im.convert("RGB")
                     f.thumbnail((ANIM_W, ANIM_W))
-                    frames.append(f.copy())
+                    f = f.copy()
+                    _stamp_frame(f, ts)
+                    frames.append(f)
             if fmt == "gif":
                 base = frames[0].convert("P", palette=Image.ADAPTIVE, colors=256)
                 pal = [f.quantize(palette=base, dither=Image.FLOYDSTEINBERG) for f in frames]
