@@ -190,6 +190,31 @@ variable "adsb_feeder_ip" {
   default     = "192.168.6.86"
 }
 
+# --- Weather station node (Davis Vantage on the Pi Zero, weather2) ------------
+variable "weather_host" {
+  description = "Hostname/IP of the weather Pi Zero (weather2). Use the IP since weather2.srvr may not resolve from thebeast/LXC."
+  type        = string
+  default     = "192.168.6.32"
+}
+
+variable "weather_ssh_user" {
+  description = "SSH user on weather2 (passwordless sudo for installs/systemctl)"
+  type        = string
+  default     = "rgardner"
+}
+
+variable "weather_compute_ip" {
+  description = "Static IP of the weather-compute LXC (vmid_base+5)"
+  type        = string
+  default     = "192.168.6.87"
+}
+
+variable "weather_cutover" {
+  description = "pi-weather cutover flag — false stages the bridge idle; true performs the single-master switch (stop local weewx, start ser2net). Flip only at the coordinated cutover."
+  type        = bool
+  default     = false
+}
+
 variable "ssh_private_key_path" {
   description = "Private key thebeast's deploy user uses to reach the Pi"
   type        = string

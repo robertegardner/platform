@@ -25,6 +25,10 @@ locals {
   # (readsb 1090 + dump978-fa 978) and ships Beast to the rack adsb-feeder LXC,
   # which runs ultrafeeder (the hub) — its own domain, out of the other loops.
   adsb_devices = { for id, d in local.present_devices : id => d if d.domain == "adsb" }
+  # Weather: the Davis Vantage station on the Pi Zero (weather2). The Zero is a
+  # thin serial-over-TCP bridge; the rack weather-compute LXC runs weewx + the
+  # web + uploads. Own domain, out of the SDR loops.
+  weather_devices = { for id, d in local.present_devices : id => d if d.domain == "weather" }
 }
 
 # Tier 1 — Acquisition (Pi, bare metal). NO container resource.
@@ -190,4 +194,37 @@ module "pi_adsb" {
   ssh_user             = var.adsb_ssh_user
   ssh_private_key_path = var.ssh_private_key_path
   devices              = local.adsb_devices
+}
+
+# Tier 3 (extra) — weather-compute LXC: weewx 5 for the Davis Vantage (read over
+# the Pi Zero's ser2net bridge) + Belchertown + uploads + nginx (bobgardner.org).
+module "weather_compute" {
+  source = "./modules/weather-compute"
+
+  vmid                 = var.vmid_base + 5
+  ip                   = var.weather_compute_ip
+  prefix               = var.prefix
+  gw                   = var.gw_server
+  vlan_id              = var.vlan_server
+  node                 = var.pm_node
+  storage              = var.lxc_storage
+  template             = var.lxc_template
+  bridge               = var.pve_bridge
+  ssh_public_key       = var.ssh_public_key
+  ssh_private_key_path = var.ssh_private_key_path
+}
+
+# Tier 1 (extra) — pi-weather: the LOCAL Davis collector on the Pi Zero (weather2).
+# weewx collection stays here; the archive DB replicates to weather-compute via
+# Litestream. `cutover` defaults false (install Litestream idle; nothing changes
+# live). Flip true to disable on-Zero reports + start replication.
+module "pi_weather" {
+  source = "./modules/pi-weather"
+
+  weather_host         = var.weather_host
+  ssh_user             = var.weather_ssh_user
+  ssh_private_key_path = var.ssh_private_key_path
+  devices              = local.weather_devices
+  rack_host            = var.weather_compute_ip
+  cutover              = var.weather_cutover
 }

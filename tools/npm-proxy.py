@@ -60,12 +60,14 @@ def get_token():
     return set_cookie.split(";", 1)[0]  # "__Host-Http-token=..."
 
 
-# Fields the PUT endpoint accepts back (strip ids/timestamps/computed).
+# Fields the PUT/POST endpoints accept back (strip ids/timestamps/computed).
+# NB: NPMplus 400s if `access_list_id` is sent on POST *or* PUT — omit it (a
+# repoint/clone never needs to change the ACL anyway).
 EDITABLE = [
     "domain_names", "forward_scheme", "forward_host", "forward_port",
     "certificate_id", "ssl_forced", "hsts_enabled", "hsts_subdomains",
     "http2_support", "block_exploits", "caching_enabled",
-    "allow_websocket_upgrade", "access_list_id", "advanced_config",
+    "allow_websocket_upgrade", "advanced_config",
     "enabled", "meta", "locations",
 ]
 

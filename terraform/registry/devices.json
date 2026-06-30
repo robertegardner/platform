@@ -157,6 +157,17 @@
       "freq_hz": 978000000,
       "sample_rate_default": 2083334,
       "usb_controller": "p24"
+    },
+    "davis-vantage": {
+      "_comment": "Davis Vantage weather station console on weather2.srvr (Pi Zero 2 W). NOT an SDR — a serial weather station read over Bluetooth rfcomm (/dev/rfcomm0, console MAC 00:1B:DC:50:05:DE). weewx COLLECTION stays on the Zero (the Vantage DMPAFT archive download only works over the local BT serial — it failed `no <ACK>` over a ser2net/TCP relay, so the old bridge model was abandoned). The Zero keeps collecting + uploading (WU/PWSweather/Influx/MQTT) and replicates its archive DB to the rack weather-compute LXC (905/.87) via Litestream (SFTP push). The rack restores the replica + runs report-only weewx (Belchertown + Seasons) + nginx, and serves bobgardner.org. domain:weather keeps it out of the SDR loops. The pi-weather module has a `cutover` flag (default false = install Litestream idle, change nothing live).",
+      "present": true,
+      "host": "weather2.srvr",
+      "console_mac": "00:1B:DC:50:05:DE",
+      "antenna": "n/a",
+      "feed": "Davis Vantage console (Bluetooth SPP)",
+      "role": "weather-station",
+      "domain": "weather",
+      "transport": "litestream"
     }
   }
 }
