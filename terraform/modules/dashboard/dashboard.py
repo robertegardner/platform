@@ -151,9 +151,17 @@ def poll_radio():
     return tile
 
 
-SCANNER_MODE_NAMES = {"noaa": "NOAA Weather Radio", "p25": "P25 trunk",
-                      "atc": "ATC airband", "marine": "Marine", "ems": "EMS",
-                      "monitor": "Monitor"}
+# The scanner is the discone / Airspy-R2 — a SINGLE tuner coordinated by the
+# r2-mode coordinator on .83. NOAA Weather Radio is the 24/7 default; P25 (MOSWIN
+# trunk) and ATC airband preempt it on demand. Order = how they show as mode pills.
+SCANNER_MODES = [
+    {"key": "noaa", "chip": "NOAA", "name": "NOAA Weather Radio",
+     "desc": "162.550 MHz · 24/7 default", "mount": "/wx.mp3"},
+    {"key": "p25", "chip": "P25", "name": "P25 trunk",
+     "desc": "MOSWIN trunk · scanning", "mount": "/ems.mp3"},
+    {"key": "atc", "chip": "ATC", "name": "ATC airband",
+     "desc": "aviation AM · on demand", "mount": "/scanner-atc.mp3"},
+]
 
 
 def poll_scanner():
@@ -161,19 +169,29 @@ def poll_scanner():
     r2, r2err = _get_json(f"{SCANNER_BASE}/api/r2/state")
     tile = {"title": "Scanner", "icon": "\U0001F4E1", "open_url": OPEN_SCANNER}
     if state is None and r2 is None:
-        tile.update(state="down", headline="Offline", detail=r2err or "unreachable")
+        tile.update(state="down", headline="Offline", detail=r2err or "unreachable",
+                    modes=[])
         return tile
-    mode = _first(r2 or {}, "mode", "role", "r2_role", default="")
-    name = SCANNER_MODE_NAMES.get(str(mode).lower(), str(mode).upper() or "Scanner")
+    # monitor.service backs ATC, so map unit->atc when mode isn't explicit.
+    mode = str(_first(r2 or {}, "mode", "role", "r2_role", default="noaa")).lower()
+    active = next((m for m in SCANNER_MODES if m["key"] == mode), None)
+    headline = active["name"] if active else (mode.upper() or "Scanner")
+    detail = active["desc"] if active else "monitoring"
+    # A live P25 call is the one "active/now" state worth flagging.
     current = _first(state or {}, "current", "call", "talkgroup")
-    if isinstance(current, dict):
-        tg = _first(current, "tgid", "talkgroup", "tg", "name", "desc")
-        detail, active = (f"call active · TG {tg}" if tg else "call active"), True
-    elif current:
-        detail, active = str(current), True
-    else:
-        detail, active = "monitoring · idle", False
-    tile.update(state=("warn" if active else "ok"), headline=name, detail=detail)
+    call = False
+    if mode == "p25" and current:
+        call = True
+        if isinstance(current, dict):
+            tg = _first(current, "tgid", "talkgroup", "tg", "name", "desc")
+            detail = f"call active · TG {tg}" if tg else "call active"
+        else:
+            detail = f"call active · {current}"
+    modes = [{"name": m["chip"], "active": m["key"] == mode,
+              "default": m["key"] == "noaa"} for m in SCANNER_MODES]
+    tile.update(state=("warn" if call else "ok"), headline=headline, detail=detail,
+                modes=modes,
+                audio_url=(ICECAST_PUBLIC + active["mount"] if active else None))
     return tile
 
 
@@ -482,6 +500,13 @@ audio{width:100%;height:34px;border-radius:var(--r-pill);filter:saturate(.9)}
 .chip b{color:var(--on);font-weight:600}
 .chip .ld{width:7px;height:7px;border-radius:50%;background:var(--green)}
 .chip.idle .ld{background:var(--grey)}
+/* scanner mode pills */
+.chip.mode{padding:6px 11px}
+.chip.mode.active{background:var(--p-container);border-color:var(--primary);
+  color:var(--on-p-container);font-weight:600;box-shadow:0 0 0 1px var(--primary) inset}
+.chip .def{font-size:.62rem;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--dim);margin-left:5px}
+.chip.mode.active .def{color:var(--primary)}
 /* open button (MD3 filled-tonal) */
 .foot{margin-top:auto;display:flex;align-items:center;gap:10px;padding-top:4px}
 .open{margin-left:auto;display:inline-flex;align-items:center;gap:7px;
@@ -526,6 +551,13 @@ function preview(key,d){
     return '<div class="preview"><audio controls preload="none" src="'+esc(d.audio_url)+'"></audio></div>';
   if(key==="satellite"&&d.image_url)
     return '<div class="preview"><img class="thumb" alt="latest GOES image" src="'+esc(d.image_url)+'" onerror="this.style.display=\'none\'"></div>';
+  if(key==="scanner"&&d.modes&&d.modes.length){
+    var pills=d.modes.map(function(m){
+      return '<span class="chip mode'+(m.active?" active":"")+'">'+esc(m.name)+
+        (m.default?'<span class="def">default</span>':'')+'</span>'}).join("");
+    var au=d.audio_url?'<audio controls preload="none" src="'+esc(d.audio_url)+'"></audio>':'';
+    return '<div class="preview"><div class="chips">'+pills+'</div>'+au+'</div>';
+  }
   if(key==="adsb")
     return '<div class="preview"><div class="big">'+(d.count||0)+'<span class="u">aircraft tracked</span></div></div>';
   if(key==="distribution"&&d.mounts&&d.mounts.length){
