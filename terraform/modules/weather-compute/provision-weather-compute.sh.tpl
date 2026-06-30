@@ -17,8 +17,17 @@ echo "==> weather-compute on $(hostname) — report-only weewx (restore $${REPLI
 
 # --- 1) Base packages (the Ubuntu LXC template ships no curl/wget/gnupg) ------
 apt-get update -qq
-apt-get install -y wget gnupg dirmngr nginx rsync sqlite3 python3-paho-mqtt python3-setuptools >/dev/null 2>&1 \
+apt-get install -y wget gnupg dirmngr nginx rsync sqlite3 python3-paho-mqtt python3-setuptools locales >/dev/null 2>&1 \
   || echo "    WARN: base package install failed"
+
+# --- 1a) A REAL locale (the LXC default LANG=C is load-bearing) ---------------
+# Belchertown embeds the system locale as a BCP-47 tag for the live tiles' JS.
+# With LANG=C it bakes "C" into the page; the browser's Intl/toLocaleString then
+# throws "Invalid language tag: C" on every MQTT message — Paho catches it as a
+# fatal error and drops the connection, so the live-tile MQTT toggles
+# connected<->lost forever. Generate en_US.UTF-8 so it embeds "en-US".
+locale-gen en_US.UTF-8 >/dev/null 2>&1 && update-locale LANG=en_US.UTF-8 >/dev/null 2>&1 \
+  && echo "    locale: en_US.UTF-8 generated" || echo "    WARN: locale-gen failed"
 
 # --- 1b) Timezone = America/Chicago (Cape Girardeau, Central) -----------------
 # weectl report run renders timestamps in the system TZ, and Belchertown bakes the
@@ -88,6 +97,9 @@ install -d -m 0755 "$REPLICA"
 cat > /usr/local/sbin/weather-report.sh <<EOF
 #!/usr/bin/env bash
 # platform-managed (weather-compute): restore the Litestream replica + run reports.
+# LANG must be a real locale (not C) or Belchertown bakes "C" into the live-tile
+# JS and the browser's MQTT handler crashes on every message (see provisioner 1a).
+export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 set -uo pipefail
 REPLICA="${replica_path}"
 DB="${db_path}"
