@@ -54,6 +54,11 @@ OPEN_ICECAST = os.environ.get("DASH_OPEN_ICECAST", "https://icecast.rg2.io")
 FM_AUDIO_URL = os.environ.get("DASH_FM_AUDIO_URL", "https://icecast.rg2.io/fm.mp3")
 # Public Icecast base — the radio tile plays the live mount (FM or AM) from here.
 ICECAST_PUBLIC = os.environ.get("DASH_ICECAST_PUBLIC", "https://icecast.rg2.io")
+# Belchertown's generated data file — current conditions from the Davis station.
+WEATHER_DATA_URL = os.environ.get("DASH_WEATHER_JSON",
+                                  WEATHER_BASE.rstrip("/") + "/json/weewx_data.json")
+# Continuous NOAA Weather Radio mount (HF+ 162.550) — played on the weather tile.
+WX_AUDIO_URL = os.environ.get("DASH_WX_AUDIO_URL", "https://icecast.rg2.io/wx.mp3")
 
 # GOES freshness thresholds (seconds): newer than OK is green; older than DOWN is
 # red. The headline is a derived Cape-crop that regenerates slower than the raw ABI
@@ -100,6 +105,24 @@ def _first(d, *keys, default=None):
         if v not in (None, "", [], {}):
             return v
     return default
+
+
+def _num(s):
+    """Leading number out of a formatted string ('96.4 &#176;F' -> 96.4)."""
+    if s is None:
+        return None
+    if isinstance(s, (int, float)):
+        return float(s)
+    buf = ""
+    for ch in str(s):
+        if ch.isdigit() or ch in ".-":
+            buf += ch
+        elif buf:
+            break
+    try:
+        return float(buf)
+    except ValueError:
+        return None
 
 
 def _ago(sec):
@@ -235,26 +258,93 @@ def poll_goes():
     return tile
 
 
+def _wx_condition(cur, alm):
+    """Derive a sky/precip condition + emoji from Davis-station data (no cloud
+    sensor, so it's a heuristic from rain rate, day/night, and sun strength)."""
+    temp = _num(cur.get("outTemp_formatted") or cur.get("outTemp")) or 50
+    rate = _num(cur.get("rainRate")) or 0
+    if rate > 0:
+        return ("Snow", "\U0001F328️") if temp <= 34 else ("Rain", "\U0001F327️")
+    epoch = _num(cur.get("epoch")) or 0
+    sunrise = _num(alm.get("sunrise_epoch"))
+    sunset = _num(alm.get("sunset_epoch"))
+    is_day = (sunrise and sunset and sunrise <= epoch <= sunset)
+    if not is_day:
+        return "Clear night", "\U0001F319"          # 🌙
+    uv = _num(cur.get("uv")) or 0
+    solar = _num(cur.get("solar_radiation")) or 0
+    if uv >= 5 or solar >= 600:
+        return "Sunny", "☀️"               # ☀️
+    if uv >= 2 or solar >= 250:
+        return "Partly cloudy", "⛅"             # ⛅
+    return "Cloudy", "☁️"                  # ☁️
+
+
 def poll_weather():
+    wd, _ = _get_json(WEATHER_DATA_URL)
     alert, _ = _get_json(f"{WX_BASE}/api/alert")
-    site_up = _head_ok(f"{WEATHER_BASE}/")
-    tile = {"title": "Weather", "icon": "\U0001F326️", "open_url": OPEN_WEATHER}
+    tile = {"title": "Weather", "icon": "\U0001F326️", "open_url": OPEN_WEATHER,
+            "audio_url": WX_AUDIO_URL}
+
+    # Active SAME/EAS alert (shown on the card + drives the top banner).
     active = (alert or {}).get("active")
+    severe = False
     if active:
         tier = active.get("tier", "")
-        ev = active.get("event") or active.get("event_code") or "Alert"
-        tile["alert"] = {"event": ev, "tier": tier,
-                         "areas": active.get("areas", [])}
-        tile.update(state=("warn" if tier in ("extreme", "severe") else "ok"),
-                    headline=f"⚠ {ev}", detail=f"{tier} alert active")
-        return tile
-    tile["alert"] = None
-    if alert is not None or site_up:
-        tile.update(state=("ok" if site_up else "warn"),
-                    headline="EAS: clear",
-                    detail=("station online" if site_up else "site unreachable"))
+        severe = tier in ("extreme", "severe")
+        tile["alert"] = {"event": active.get("event") or active.get("event_code")
+                         or "Alert", "tier": tier, "areas": active.get("areas", [])}
     else:
-        tile.update(state="down", headline="Offline", detail="unreachable")
+        tile["alert"] = None
+
+    cur = (wd or {}).get("current") or {}
+    if cur:
+        cond, icon = _wx_condition(cur, (wd or {}).get("almanac") or {})
+        temp = _num(cur.get("outTemp_formatted") or cur.get("outTemp"))
+        feels = _num(cur.get("appTemp"))
+        hum = cur.get("outHumidity") or ""
+        wind = f"{cur.get('windcompass', '')} {cur.get('windspeed', '')}".strip()
+        t = f"{round(temp)}°F" if temp is not None else "—"
+        det = []
+        if feels is not None and temp is not None and abs(feels - temp) >= 2:
+            det.append(f"feels {round(feels)}°")
+        if hum:
+            det.append(f"{hum} RH")
+        if wind:
+            det.append(wind)
+        # metric chips
+        metrics = []
+        dew = _num(cur.get("dewpoint"))
+        if dew is not None:
+            metrics.append({"label": "Dew", "value": f"{round(dew)}°"})
+        baro = cur.get("barometer_formatted")
+        if baro:
+            tr = _num(cur.get("barometer_trend")) or 0
+            arrow = "↑" if tr > 0.001 else ("↓" if tr < -0.001 else "→")
+            metrics.append({"label": "Baro", "value": f"{baro} {arrow}"})
+        uv = _num(cur.get("uv"))
+        if uv is not None:
+            metrics.append({"label": "UV", "value": f"{uv:g}"})
+        rate = _num(cur.get("rainRate")) or 0
+        if rate > 0:
+            metrics.append({"label": "Rain", "value": cur.get("rainRate", "")})
+        tile.update(state=("warn" if severe else "ok"), icon=icon,
+                    headline=f"{t} · {cond}",
+                    detail=" · ".join(det) or "current conditions",
+                    metrics=metrics)
+        return tile
+
+    # No station data — fall back to up/down + alert state.
+    site_up = _head_ok(f"{WEATHER_BASE}/")
+    if active:
+        tile.update(state=("warn" if severe else "ok"),
+                    headline=f"⚠ {tile['alert']['event']}",
+                    detail=f"{tile['alert']['tier']} alert active", metrics=[])
+    elif site_up:
+        tile.update(state="ok", headline="Station online",
+                    detail="conditions unavailable", metrics=[])
+    else:
+        tile.update(state="down", headline="Offline", detail="unreachable", metrics=[])
     return tile
 
 
@@ -507,6 +597,13 @@ audio{width:100%;height:34px;border-radius:var(--r-pill);filter:saturate(.9)}
 .chip .def{font-size:.62rem;text-transform:uppercase;letter-spacing:.5px;
   color:var(--dim);margin-left:5px}
 .chip.mode.active .def{color:var(--primary)}
+.chip .ck{color:var(--on-v)}
+/* weather */
+.wxalert{padding:8px 12px;border-radius:10px;font-size:.82rem;
+  background:linear-gradient(135deg,#4a3410,#2a1f08);border:1px solid #6a4f1f;color:#ffe9c2}
+.wxalert.sev{background:linear-gradient(135deg,#4a1414,#2a0d0d);
+  border-color:#6a2222;color:#ffd9d9}
+.nwr{font-size:.72rem;color:var(--on-v);font-weight:600;letter-spacing:.3px;margin-top:2px}
 /* open button (MD3 filled-tonal) */
 .foot{margin-top:auto;display:flex;align-items:center;gap:10px;padding-top:4px}
 .open{margin-left:auto;display:inline-flex;align-items:center;gap:7px;
@@ -566,9 +663,23 @@ function preview(key,d){
         esc(m.name)+' <b>'+m.listeners+'</b></span>'}).join("");
     return '<div class="preview"><div class="chips">'+c+'</div></div>';
   }
-  if(key==="weather"&&d.alert)
-    return '<div class="preview"><div class="chips"><span class="chip"><b>'+
-      esc(d.alert.event)+'</b> · '+esc(d.alert.tier)+'</span></div></div>';
+  if(key==="weather"){
+    var parts="";
+    if(d.alert){
+      var sev=(d.alert.tier==="extreme"||d.alert.tier==="severe");
+      parts+='<div class="wxalert'+(sev?" sev":"")+'">⚠️ <b>'+esc(d.alert.event)+
+        '</b> · '+esc(d.alert.tier)+(d.alert.areas&&d.alert.areas.length?
+        ' ('+esc(d.alert.areas.join(", "))+')':'')+'</div>';
+    }
+    if(d.metrics&&d.metrics.length)
+      parts+='<div class="chips">'+d.metrics.map(function(m){
+        return '<span class="chip"><span class="ck">'+esc(m.label)+'</span> <b>'+
+          esc(m.value)+'</b></span>'}).join("")+'</div>';
+    if(d.audio_url)
+      parts+='<div class="nwr">📻 NOAA Weather Radio · 162.550</div>'+
+        '<audio controls preload="none" src="'+esc(d.audio_url)+'"></audio>';
+    return parts?'<div class="preview">'+parts+'</div>':"";
+  }
   return "";
 }
 
