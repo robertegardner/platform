@@ -672,6 +672,60 @@ def legend_for_group(group):
             "mid": round((s["lo"] + s["hi"]) / 2, 1), "colors": cols}
 
 
+# ---- animated loops (WebP + GIF) -------------------------------------------
+ANIM_W = int(os.environ.get("GOES_ANIM_W", "1100"))      # loop frame max dimension
+ANIM_MAXN = int(os.environ.get("GOES_ANIM_MAXN", "48"))
+
+
+def _anim_sources(group, comp, n):
+    """Most-recent-N (group, composite) original relpaths, oldest->newest."""
+    caps = [c for c in get_index() if c["group"] == group][:max(2, min(ANIM_MAXN, n))]
+    rels = []
+    for c in reversed(caps):                       # oldest -> newest = forward play
+        use = comp if comp and (comp in c["composites"] or comp in c["bands"]) else c.get("preferred")
+        if use:
+            rels.append(os.path.join(c["dir"], use))
+    return rels
+
+
+def ensure_anim(group, comp, n, ms, fmt):
+    """Build (and cache) an animated WebP/GIF loop from the recent frames. Frames
+    come from the cached previews (fast) downscaled to ANIM_W."""
+    fmt = "gif" if fmt == "gif" else "webp"
+    rels = _anim_sources(group, comp, n)
+    if len(rels) < 2:
+        return None
+    previews = [ensure_preview(r) for r in rels]
+    previews = [p for p in previews if p]
+    if len(previews) < 2:
+        return None
+    latest = max(os.path.getmtime(p) for p in previews)
+    safe = (group + "_" + (comp or "pref")).replace("/", "_").replace(" ", "_").replace("·", "-")
+    out = os.path.join(DERIVED, "anim", f"{safe}_n{len(previews)}_ms{ms}.{fmt}")
+    try:
+        if os.path.exists(out) and os.path.getmtime(out) >= latest:
+            return out
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        frames = []
+        for p in previews:
+            with Image.open(p) as im:
+                f = im.convert("RGB")
+                f.thumbnail((ANIM_W, ANIM_W))
+                frames.append(f.copy())
+        if fmt == "gif":
+            base = frames[0].convert("P", palette=Image.ADAPTIVE, colors=256)
+            pal = [f.quantize(palette=base, dither=Image.FLOYDSTEINBERG) for f in frames]
+            pal[0].save(out, format="GIF", save_all=True, append_images=pal[1:],
+                        duration=ms, loop=0, optimize=True, disposal=2)
+        else:
+            frames[0].save(out, format="WEBP", save_all=True, append_images=frames[1:],
+                           duration=ms, loop=0, quality=72, method=4)
+        return out
+    except (OSError, ValueError) as e:
+        log(f"anim {group}/{comp}: {e}")
+        return None
+
+
 # ---- HTTP ------------------------------------------------------------------
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -712,7 +766,7 @@ dialog .dh select,dialog .dh button{background:#1a2433;color:var(--text);border:
 <div class="tabs" id="tabs"></div>
 <div class="grid" id="grid"><div class="empty">loading…</div></div>
 </div>
-<dialog id="dlg"><div class="dh"><select id="comp"></select><label class="dim" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="ovl">overlay</label><a class="dim" id="full" target="_blank" rel="noopener" style="text-decoration:underline">full res &#8595;</a><span class="dim" id="dlgmeta"></span><button id="dlgx">close</button></div><img id="dlgimg" alt=""><div id="legend"></div></dialog>
+<dialog id="dlg"><div class="dh"><select id="comp"></select><label class="dim" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="ovl">overlay</label><button id="loopbtn" class="dim" style="background:#1a2433;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:.2rem .55rem;cursor:pointer">&#9654; Loop</button><span id="loopctl" style="display:none;align-items:center;gap:.4rem"><input type="range" id="lframes" min="6" max="48" value="18" style="width:88px"><span class="dim" id="lframesn">18f</span><select id="lspeed" style="background:#0d1420;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:.15rem"><option value="400">slow</option><option value="250" selected>med</option><option value="120">fast</option></select><a class="dim" id="gifdl" style="text-decoration:underline">&#8595; GIF</a></span><a class="dim" id="full" target="_blank" rel="noopener" style="text-decoration:underline">full res &#8595;</a><span class="dim" id="dlgmeta"></span><button id="dlgx">close</button></div><img id="dlgimg" alt=""><div id="legend"></div></dialog>
 <script>
 var $=function(i){return document.getElementById(i)};var IMG="/api/goes/image/";
 var GROUPS=[];var cur=null;var CAPS=[];
@@ -730,14 +784,27 @@ function render(){var cs=CAPS;
   $('grid').innerHTML=cs.length?cs.map(function(c){var t=c.preferred?(IMG+'thumb/'+encodeURI(c.dir+'/'+c.preferred)):'';
     return '<div class="card" data-id="'+esc(c.id)+'"><img loading="lazy" src="'+t+'"><div class="m"><b>'+fmt(c.timestamp)+'</b>'+c.composites.length+' composite(s) · '+c.bands.length+' band(s)</div></div>'}).join(''):'<div class="empty">no captures in this group yet</div>';
   Array.prototype.forEach.call($('grid').children,function(el){el.addEventListener('click',function(){open(el.getAttribute('data-id'))})});}
+var looping=false;
 function open(id){var c=CAPS.find(function(x){return x.id===id});if(!c)return;
   var opts=c.composites.concat(c.bands);
   $('comp').innerHTML=opts.map(function(o){return '<option value="'+esc(o)+'">'+esc(o.replace('abi_rgb_','').replace(/_/g,' ').replace('.png',''))+'</option>'}).join('');
   $('dlgmeta').textContent=c.sector+' · '+fmt(c.timestamp);
-  function show(){var rel=encodeURI(c.dir+'/'+$('comp').value);
+  function animQS(fmt){return '/api/goes/anim?group='+encodeURIComponent(c.group||'')+'&comp='+encodeURIComponent($('comp').value)+'&n='+$('lframes').value+'&ms='+$('lspeed').value+'&fmt='+fmt;}
+  function show(){
+    if(looping){$('lframesn').textContent=$('lframes').value+'f';$('gifdl').href=animQS('gif');
+      $('loopbtn').innerHTML='&#8987; building…';
+      $('dlgimg').onload=function(){if(looping)$('loopbtn').innerHTML='&#10073;&#10073; Still';};
+      $('dlgimg').onerror=function(){if(looping)$('loopbtn').innerHTML='&#9888; too few frames';};
+      $('dlgimg').src=animQS('webp');return;}
+    $('dlgimg').onload=null;$('dlgimg').onerror=null;
+    var rel=encodeURI(c.dir+'/'+$('comp').value);
     $('dlgimg').src=$('ovl').checked?(IMG+rel+'?overlay=1'):(IMG+'preview/'+rel);  // light preview, not the 23MB raw
     $('full').href=IMG+rel;}
-  $('comp').value=c.preferred||opts[0];show();$('comp').onchange=show;$('ovl').onchange=show;
+  function setLoop(on){looping=on;$('loopctl').style.display=on?'inline-flex':'none';
+    $('loopbtn').innerHTML=on?'&#10073;&#10073; Still':'&#9654; Loop';$('ovl').parentNode.style.opacity=on?'.4':'1';show();}
+  $('loopbtn').onclick=function(){setLoop(!looping)};
+  $('lframes').oninput=function(){if(looping)show()};$('lspeed').onchange=function(){if(looping)show()};
+  $('comp').value=c.preferred||opts[0];setLoop(false);$('comp').onchange=show;$('ovl').onchange=show;
   $('legend').innerHTML='';
   fetch('/api/goes/legend?group='+encodeURIComponent(c.group||''),{cache:'no-store'}).then(function(r){return r.json()}).then(function(g){
     if(!g||!g.colors)return;
@@ -840,8 +907,13 @@ class Handler(BaseHTTPRequestHandler):
                 data = f.read()
         except OSError:
             return self._json(404, {"error": "not found"})
+        ct = ("image/jpeg" if path.endswith(".jpg") else
+              "image/webp" if path.endswith(".webp") else
+              "image/gif" if path.endswith(".gif") else "image/png")
         self.send_response(200)
-        self.send_header("Content-Type", "image/jpeg" if path.endswith(".jpg") else "image/png")
+        self.send_header("Content-Type", ct)
+        if path.endswith(".gif"):       # nudge a download for the shareable GIF
+            self.send_header("Content-Disposition", 'attachment; filename="goes-loop.gif"')
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", f"public, max-age={max_age}")
         self._cors()
@@ -939,6 +1011,15 @@ class Handler(BaseHTTPRequestHandler):
                              "total": len(caps), "preferred": PREFERRED})
         elif path == "/api/goes/legend":
             self._json(200, legend_for_group(params.get("group", "")) or {})
+        elif path == "/api/goes/anim":
+            try:
+                n = int(params.get("n", "18")); ms = int(params.get("ms", "250"))
+            except ValueError:
+                n, ms = 18, 250
+            ms = max(40, min(2000, ms))
+            fmt = "gif" if params.get("fmt") == "gif" else "webp"
+            p = ensure_anim(params.get("group", ""), params.get("comp", ""), n, ms, fmt)
+            self._file(p, max_age=300) if p else self._json(404, {"error": "need >= 2 frames"})
         elif path.startswith("/api/goes/image/thumb/"):
             rel = path[len("/api/goes/image/thumb/"):]
             t = ensure_thumb(rel)
