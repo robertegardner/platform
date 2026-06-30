@@ -16,6 +16,11 @@ locals {
     output_dir   = var.goes_output_dir
     prune_hours  = var.prune_retention_hours
     ssh_user     = var.ssh_user
+    # goes-watch watchdog: restart goes.service if no new product lands within
+    # watch_stale_min (SatDump can stall silently — process 'active', stream dead).
+    # watch_grace_min suppresses action right after a (re)start to avoid loops.
+    watch_stale_min = 10
+    watch_grace_min = 5
   })
 }
 

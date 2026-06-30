@@ -155,4 +155,62 @@ systemctl enable goes-aim >/dev/null 2>&1 || true
 systemctl restart goes-aim || echo "    WARN: goes-aim did not start"
 echo "    goes-aim: $(systemctl is-active goes-aim 2>/dev/null) on :8091"
 
+# --- 6) goes-watch watchdog (self-heal a SILENT SatDump stall) --------------
+# SatDump can keep its process alive (systemd 'active', Restart=always never
+# fires) while the RTL-SDR sample stream has stalled — no new products land for
+# many minutes (seen live 2026-06-29: dark ~50 min). If nothing under the output
+# tree changed in $${STALE_MIN} minutes, restart the decoder. A $${GRACE_MIN}-minute
+# grace window after each (re)start prevents restart loops. Same pattern as the
+# FM fm-watch.timer. Mirrors goes-prune (write-then-enable+restart).
+cat > /usr/local/sbin/goes-watch.sh <<EOF
+#!/usr/bin/env bash
+# platform-managed (pi-goes): restart goes.service on a silent SatDump stall.
+set -uo pipefail
+OUT="${output_dir}"
+STALE_MIN=${watch_stale_min}
+GRACE_MIN=${watch_grace_min}
+
+# Only police a service that's meant to be running (leave failed/stopped alone).
+[ "\$(systemctl is-active goes.service)" = "active" ] || exit 0
+
+# Grace: skip if goes.service (re)started within the grace window.
+ae=\$(systemctl show goes.service -p ActiveEnterTimestamp --value 2>/dev/null)
+if [ -n "\$ae" ]; then
+  st=\$(date -d "\$ae" +%s 2>/dev/null || echo 0)
+  [ "\$st" -gt 0 ] && [ \$(( \$(date +%s) - st )) -lt \$(( GRACE_MIN * 60 )) ] && exit 0
+fi
+
+# Healthy if ANY product changed within the stale window (stops at first hit).
+[ -n "\$(find "\$OUT" -type f -mmin -\$STALE_MIN -print -quit 2>/dev/null)" ] && exit 0
+
+echo "goes-watch: no new products in \$STALE_MIN min — SatDump stalled; restarting goes.service"
+systemctl restart goes.service
+EOF
+chmod +x /usr/local/sbin/goes-watch.sh
+
+cat > /etc/systemd/system/goes-watch.service <<'EOF'
+[Unit]
+Description=Watchdog — restart SatDump if GOES products go silent
+After=goes.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/goes-watch.sh
+EOF
+
+cat > /etc/systemd/system/goes-watch.timer <<'EOF'
+[Unit]
+Description=Run goes-watch periodically
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+AccuracySec=30s
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable goes-watch.timer >/dev/null 2>&1 || true
+systemctl restart goes-watch.timer || true
+echo "    goes-watch.timer: $(systemctl is-active goes-watch.timer 2>/dev/null) (stale ${watch_stale_min}m, grace ${watch_grace_min}m)"
+
 echo "==> pi-goes done."
