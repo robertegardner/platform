@@ -4,7 +4,34 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
-## 2026-06-29 (latest) — ADS-B Pi (p24) folded into the platform
+## 2026-06-30 (latest) — weather2 (Davis Vantage) folded into the platform
+
+**State: LIVE + merged (`446b652`). weewx COLLECTION stays on the Pi Zero — the
+Vantage DMPAFT archive download only works over the local BT serial (it fails
+`no <ACK>` over a ser2net/TCP relay, which killed the original bridge plan). The
+archive DB replicates to a NEW `weather-compute` LXC (905 / 192.168.6.87) via
+Litestream; the rack runs report-only weewx (Belchertown + Seasons) + nginx + the
+local webcam fetch. NPM `w.rg2.io`/`p.rg2.io` → .87.**
+
+- **Inverted the plan**: keep collect + uploads (WU/PWS/Influx/MQTT) on the Zero (all
+  lightweight); move only report-gen + web (the real 464 MB flakiness) to the rack.
+  `pi-weather` (Zero: Litestream replicate, WAL) + `weather-compute` (rack: litestream
+  restore → `weectl report run` on a 10-min timer; **weewxd masked** so it can't
+  double-publish). Registry `davis-vantage` transport=litestream.
+- **DB migration** (1.34 M rows over the Zero's flaky WiFi): only a resumable
+  `rsync --partial --append` of a weewx-stopped (consistent) DB survived.
+- **Cutover gotchas (each bit live)**: Litestream needs WAL (weewx tolerates it); rack
+  `LANG=C` silently breaks the Belchertown MQTT live tiles (`moment_locale="C"` →
+  browser Intl crash → connected/lost toggle; fix = `en_US.UTF-8`); rack TZ must be
+  America/Chicago (else times render ~5 h in the future); Belchertown py3.12
+  `locale.format` → `format_string`; nginx root = `/var/www/html`; the local webcams
+  (getpix.sh) folded onto the rack (it routes to the 192.168.90.x cam VLAN) + the
+  hook's hard-coded `http://weather.bobgardner.org/images/` made root-relative;
+  NPMplus 400s on `access_list_id` in a PUT.
+- **Outstanding (user-managed)**: repoint the `weather.bobgardner.org` Cloudflare tunnel
+  + NPM host 1 `bobgardner.org` → .87. Memory [[weather2-platform-fold-todo]].
+
+## 2026-06-29 — ADS-B Pi (p24) folded into the platform
 
 **State: the standalone ADS-B feeder is now a platform tier. `p24` is DECODE-ONLY
 (readsb 1090 + dump978-fa 978 → Beast/SBS on the LAN); a NEW `adsb-feeder` LXC

@@ -332,6 +332,16 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   the JS `$()` → "cannot find 'i'", report aborts), and weewx caches the compiled
   template by the parent `.tmpl` mtime, so after editing `touch` the `.tmpl` +
   `weectl report run`. Details: [[weather2-weewx-belchertown-wx-widget]] memory.)
+- `w.rg2.io`, `p.rg2.io` → **192.168.6.87:80** (the weather2 Belchertown site on the
+  **weather-compute** LXC — vmid 905, `modules/weather-compute`. The Pi Zero
+  `weather2.srvr` still COLLECTS + uploads (Vantage DMPAFT only works over the local
+  BT serial) and replicates its archive DB here via **Litestream**; this box runs
+  report-only weewx (`weectl report run` Belchertown+Seasons on a 10-min timer, weewxd
+  MASKED) + nginx + the local-webcam fetch (`weather-webcam.timer`). LIVE 2026-06-30.
+  `weather.bobgardner.org` (Cloudflare tunnel) + NPM host 1 `bobgardner.org` are
+  USER-managed repoints → .87. Gotchas: rack needs a real locale (`LANG=C` breaks the
+  Belchertown MQTT live tiles) + TZ America/Chicago. Details:
+  [[weather2-platform-fold-todo]] memory.)
 - `goes.rg2.io` → **192.168.6.85:8095** (`goes-gallery.service` on the NEW
   **goes-archive** LXC — vmid 903, `modules/goes-archive`). Browsable GOES-19 HRIT
   gallery + `/api/goes/{latest,captures,image,space}`. The Pi `goes.srvr`
