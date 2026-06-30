@@ -335,9 +335,10 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   (2026-06-30 redesign, scanner repo `v2/scanner_api.py` `CAPTIONS_HTML`): a
   `NOAA · default / P25 / ATC` segmented switcher reading `/api/r2/state` (active =
   green dot), with a per-mode panel — **NOAA** `/wx.mp3` player; **P25** live
-  talkgroup (`/api/status`) + `/ems.mp3` player + captions + the **op25 console
-  embedded in-page** (iframe of scanner.rg2.io, shown ONLY when `mode==p25` so it
-  never 502s) + a fullscreen popout; **ATC** the amber-LCD airband tuner
+  talkgroup (`/api/status`) + `/ems.mp3` player + a **running transcript**
+  (`/api/transcript`, auto-scroll) + links to the full log and the op25 console
+  (scanner.rg2.io sets X-Frame-Options, so it opens in a NEW TAB — NOT embeddable
+  in an iframe; the dangling header link is still gone); **ATC** the amber-LCD airband tuner
   (`/api/monitor/{tune,stop}`). One click POSTs `/api/r2/mode {mode}` (P25/NOAA) or
   tunes (ATC) → `r2-mode.sh`, with a "switching ~15s" state. ATC/airband
   **preempts NOAA** (the 24/7 default), NOT P25. The retired per-freq
