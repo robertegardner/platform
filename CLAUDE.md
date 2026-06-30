@@ -9,8 +9,18 @@ lives in the sibling repos `radio` (v2) and `scanner` (v2); this repo owns the
 device registry, the source/mount contracts, and the Terraform that stands the
 whole thing up.
 
-## Current state (2026-06-14: V2 RADIO LIVE — wbfm_stream.py over remote dx-R2/TCP)
+## Current state (2026-06-30: full V2 platform LIVE — + unified dashboard, scanner v2 UI, GOES/weather/ADS-B folds)
 
+- **2026-06-29/30 platform expansion — all LIVE + merged to `main`:** unified
+  dashboard `home.rg2.io` (LXC 906/.88, one MD3 tile per domain); weather2 Davis
+  fold onto `weather-compute` (905/.87, `w`/`p.rg2.io`, report-only weewx via
+  Litestream from the Pi Zero); GOES-19 archive + gallery `goes.rg2.io` (903/.85)
+  off the dedicated decode Pi (EMWIN defaults to KPAH; loop GIF download fixed);
+  ADS-B ultrafeeder hub `adsb.rg2.io` (904/.86) off p24; the **mode-centric
+  scanner UI** at `ems.rg2.io` (NOAA·default/P25/ATC over the R2-mode coordinator,
+  P25 running transcript); NWS-active alert surfacing on `wx.rg2.io` (catches
+  long-fuse warnings with no SAME tone, e.g. Extreme Heat). Detail in the NPM proxy
+  map + `docs/session_notes.md`. The 2026-06-14 radio bullets below remain current.
 - **Attic link (2026-06-13): RESOLVED at gigabit (user). New port + cable on
   the Attic Camera Flex switch → eth0 1000FDX, autoneg ON, stable (0 new flaps
   over a ~6 h window incl. warm afternoon). The 100FDX force is gone. The user
@@ -266,20 +276,31 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
   op25 emits UDP PCM only during calls; bare ffmpeg stalls and drops the
   mount); needs `python3-setuptools` on noble.
 
-## Bring-up order (state at end of 2026-06-10)
+## Bring-up order (state 2026-06-30 — all tiers LIVE)
 
-1. ✅ `pi-acquisition` — dx-R2 proven (8 Msps CS16, Gate 0B GO). Remaining
+1. ✅ `pi-acquisition` — dx-R2 / HF+ / Airspy-R2 served over SoapyRemote; new
    devices join by flipping `present: true` in the registry + re-apply.
-2. ✅ `distribution` — rack Icecast live; **NPM `icecast.rg2.io` → .82 (done,
-   user)**. Both mounts rack-served.
-3. ✅ `scanner-compute` — op25 LIVE on the interim rtl-2838; `/ems.mp3`
-   rack-sourced. Remaining: scanner v2 app work on Airspy R2 arrival.
-4. ✅ `radio-compute` — **V2 LIVE (cut over 2026-06-14).** FM DSP on .84 via
-   `wbfm_stream.py` over the remote dx-R2/TCP; radio.rg2.io → .84:8080. The
-   2026-06-13 attempt rolled back on a MISDIAGNOSIS (blamed UDP; the real bug was
-   rx_fm mangling SoapyRemote partial reads — fixed by the Python WBFM client).
-   Remaining: stereo mux + HD/AM rack-side (radio repo v2); optional 256k bitrate
-   bump.
+2. ✅ `distribution` — rack Icecast live; `icecast.rg2.io` → .82; all mounts
+   rack-served (`fm-duck` + `icy-pusher` too).
+3. ✅ `scanner-compute` — op25 P25 on the Airspy R2 → `/ems.mp3`; `ems.rg2.io` is a
+   **mode-centric UI** (NOAA·default / P25 / ATC) driving the R2-mode coordinator
+   (`r2-mode.sh`); P25 panel = talkgroup + `/ems.mp3` + running transcript + console
+   link. ATC airband on-demand (preempts NOAA).
+4. ✅ `radio-compute` — V2 FM (`wbfm_stream.py` over dx-R2/TCP) + NOAA wx
+   (`/wx.mp3`) + `wx-alert` (SAME decode **and** NWS-active poll); `radio.rg2.io`
+   → .84. Remaining: stereo mux + HD/AM rack-side (radio repo v2); optional 256k.
+5. ✅ `goes-archive` (903/.85) — pulls GOES-19 HRIT products off the dedicated
+   decode Pi; gallery + EMWIN browser (defaults to local office **KPAH**) + the
+   weather2 Cape-crop headline; `goes.rg2.io`.
+6. ✅ `adsb-feeder` (904/.86) — sdr-enthusiasts ultrafeeder hub off p24 (Beast/UAT
+   in → FA/FR24/ADSBx/MLAT + tar1090); `adsb.rg2.io`.
+7. ✅ `weather-compute` (905/.87) — report-only weewx + Belchertown, archive DB
+   replicated from the Pi Zero collector via Litestream; `w`/`p.rg2.io`.
+8. ✅ `dashboard` (906/.88) — unified landing page, one MD3 tile per domain;
+   `home.rg2.io`.
+
+**Open / remaining:** radio stereo mux + HD/AM (radio repo v2); the Meteor/NOAA
+wxsat path is DARK pending an RTL v4; the HF+ YouLoop AM survey.
 
 ## NPM proxy map (user-managed; TARGET state for the Android app — see
 ## deployment_notes "Android app integration")
