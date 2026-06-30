@@ -106,8 +106,9 @@ WantedBy=timers.target
 EOF
 
 # --- 6) nginx — serve the Belchertown site -----------------------------------
-# Belchertown writes its index to HTML_ROOT=/var/www/html (Seasons to the /weewx
-# subdir); point nginx's root at /var/www/html so the Belchertown index is at /.
+# Belchertown + Seasons both render under the weewx HTML_ROOT (/var/www/html/weewx,
+# the StdReport default in the migrated weewx.conf); the Belchertown index lands at
+# /var/www/html/weewx/index.html, so nginx's root is that dir (index at /).
 install -d -m 0755 /var/www/html/weewx
 if ! grep -s "weather-compute managed" /etc/nginx/sites-available/default >/dev/null 2>&1; then
   cat > /etc/nginx/sites-available/default <<'EOF'
@@ -115,13 +116,13 @@ if ! grep -s "weather-compute managed" /etc/nginx/sites-available/default >/dev/
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
-    root /var/www/html;
+    root /var/www/html/weewx;
     index index.html;
     server_name _;
     location / { try_files $uri $uri/ =404; }
 }
 EOF
-  echo "    wrote nginx default site (root /var/www/html)"
+  echo "    wrote nginx default site (root /var/www/html/weewx)"
 fi
 systemctl enable nginx >/dev/null 2>&1 || true
 systemctl restart nginx || echo "    WARN: nginx restart failed"
