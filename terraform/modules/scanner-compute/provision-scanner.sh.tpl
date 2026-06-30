@@ -253,7 +253,7 @@ IQ_FREQ=769168750
 EOF
 fi
 
-echo "==> on-demand FM/AM monitor (the V1 tuner; preempts P25 -> /scanner-atc.mp3)"
+echo "==> on-demand FM/AM monitor (the V1 tuner; preempts NOAA -> /scanner-atc.mp3)"
 # monitor.service stops op25 + the bridge to free the R2, NFM/AM-demods one
 # channel (monitor_stream.py — the wbfm_stream pattern, prot=tcp) per the runtime
 # params scanner-api writes to /var/lib/scanner-compute/monitor.env, publishes
