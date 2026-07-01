@@ -91,20 +91,42 @@ online_image:
         - logger.log: "comic fetch failed — sleeping, will retry next wake"
         - deep_sleep.enter: deep_sleep_ctl
 
-# SPI bus to the panel. clk/mosi are confirmed for the E1002.
+# SPI bus to the panel (clk/mosi per Seeed's official E1002 ESPHome cookbook).
 spi:
   clk_pin: GPIO7
   mosi_pin: GPIO9
 
+# Reconciled against Seeed's official cookbook
+# (https://wiki.seeedstudio.com/reterminal_e10xx_with_esphome/, verified
+# 2026-07). The integrated `Seeed-reTerminal-E1002` model (ESPHome >= 2025.11.1)
+# PREDEFINES cs/dc/reset/busy internally — do NOT respecify them here. An earlier
+# draft added explicit pins with a NON-inverted busy_pin, which is the classic
+# "display stuck initializing" failure (esphome/esphome#12012): the E1002 busy
+# line is active-low (inverted: true). Letting the model own the pins avoids it.
 display:
   - platform: epaper_spi
     id: epd
     model: Seeed-reTerminal-E1002
-    # ⚠ Confirm these four against Seeed's official E1002 ESPHome example.
-    cs_pin: GPIO10
-    dc_pin: GPIO11
-    reset_pin: GPIO12
-    busy_pin: GPIO13
     update_interval: never
     lambda: |-
       it.image(0, 0, id(comic_img));
+
+# --- Fallback for ESPHome < 2025.11.1 (no integrated E1002 model) --------------
+# If your ESPHome predates the integrated model, delete the display block above
+# and use this explicit-pin form instead (pins + inverted flags per the cookbook;
+# note busy_pin inverted: true):
+#   display:
+#     - platform: epaper_spi
+#       id: epd
+#       model: 7.3in-spectra-e6
+#       cs_pin: GPIO10
+#       dc_pin: GPIO11
+#       reset_pin:
+#         number: GPIO12
+#         inverted: false
+#       busy_pin:
+#         number: GPIO13
+#         inverted: true
+#       update_interval: never
+#       lambda: |-
+#         it.image(0, 0, id(comic_img));
