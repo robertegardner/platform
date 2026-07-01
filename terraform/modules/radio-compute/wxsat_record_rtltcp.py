@@ -93,6 +93,7 @@ def main():
         _cmd(s, SET_AGC_MODE, 1)
 
     written = 0
+    src_error = False
     deadline = time.time() + duration
     tmp = out_path + ".part"
     with open(tmp, "wb", buffering=1 << 20) as f:
@@ -102,8 +103,16 @@ def main():
             except socket.timeout:
                 sys.stderr.write("wxsat-record: stream stalled (15s no data)\n")
                 break
+            except OSError as e:
+                # A flaky dongle makes rtl_tcp drop the client mid-stream
+                # (ConnectionResetError [Errno 104] etc). Fail cleanly instead of
+                # crashing with a traceback (rc=1) so the scheduler logs a real reason.
+                sys.stderr.write(f"wxsat-record: rtl_tcp source error: {e}\n")
+                src_error = True
+                break
             if not buf:
                 sys.stderr.write("wxsat-record: rtl_tcp closed mid-stream\n")
+                src_error = True
                 break
             f.write(buf)
             written += len(buf)
@@ -116,7 +125,13 @@ def main():
     mb = written / 1e6
     sys.stderr.write(f"wxsat-record: wrote {mb:.0f} MB ({written/ (rate*2):.0f}s) to {out_path}\n")
     # Enough samples for a usable decode? (a too-short grab = no signal / early close)
-    return 0 if written >= want_bytes * 0.5 else 12
+    if written >= want_bytes * 0.5:
+        return 0
+    # A source drop that yielded essentially no IQ is a source fault (11), not a
+    # short pass (12) — surfaces the flaky-dongle case distinctly in the log.
+    if src_error and written < want_bytes * 0.1:
+        return 11
+    return 12
 
 
 if __name__ == "__main__":

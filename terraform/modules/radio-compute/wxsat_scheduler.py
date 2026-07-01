@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -147,16 +148,31 @@ def do_capture(p, cfg):
                WXSAT_NORAD=str(p.get("norad") or ""))
     log.info("CAPTURE %s -> %s (%ss)", p["satellite"], out_dir, duration)
     write_status(cfg, "capturing", capturing=p)
+    # Generous decode budget: a ~16-min record + up to two full ~1.8 GB SatDump
+    # pipelines (72k then 80k fallback) can take ~15 min on the LXC; 600 s killed
+    # a valid pass mid-decode. 2100 s covers two capped decodes (WXSAT_DECODE_TIMEOUT
+    # per pipeline, 900 s default) plus slack — it is only a backstop, the script's
+    # own per-decode `timeout` should fire first.
+    # start_new_session=True puts the script in its own process group so that on a
+    # backstop timeout we can killpg the WHOLE tree — SatDump runs in a subshell and
+    # would otherwise reparent to PID 1 and pin a core forever (the record-of-a-bug
+    # that left a satdump grinding 4 h on a no-lock baseband).
+    proc = subprocess.Popen([CAPTURE_SCRIPT], env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, start_new_session=True)
     try:
-        # Generous decode budget: a ~16-min record + up to two full ~1.8 GB
-        # SatDump pipelines (72k then 80k fallback) can take ~15 min on the LXC;
-        # 600 s killed a valid pass mid-decode. 1800 s covers both pipelines.
-        r = subprocess.run([CAPTURE_SCRIPT], env=env, capture_output=True,
-                           text=True, timeout=duration + 1800)
+        out, err = proc.communicate(timeout=duration + 2100)
+        returncode = proc.returncode
     except subprocess.TimeoutExpired:
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(proc.pid, sig)
+            except ProcessLookupError:
+                break
+            time.sleep(5)
+        proc.wait()
         return record_outcome(p, "failed", reason="capture timed out", outdir=reldir)
-    if r.returncode != 0:
-        tail = (r.stderr or r.stdout or "capture failed").strip().splitlines()[-1:] or ["capture failed"]
+    if returncode != 0:
+        tail = (err or out or "capture failed").strip().splitlines()[-1:] or ["capture failed"]
         return record_outcome(p, "failed",
                               reason=f"{tail[0][:180]} (see {reldir}/capture.log)", outdir=reldir)
     image, thumb = _best_product(out_dir)

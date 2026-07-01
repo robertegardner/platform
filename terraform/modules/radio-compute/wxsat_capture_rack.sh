@@ -30,6 +30,11 @@ BB_FORMAT="${WXSAT_BB_FORMAT:-u8}"
 KEEP_IQ_ON_FAIL="${WXSAT_KEEP_IQ_ON_FAIL:-1}"
 KEEP_IQ_ALWAYS="${WXSAT_KEEP_IQ_ALWAYS:-0}"
 MIN_FREE_GB="${WXSAT_MIN_FREE_GB:-2}"
+# Hard cap per SatDump decode. A ~15-min baseband that LOCKS decodes in a few
+# minutes; one that never locks makes SatDump grind indefinitely (an unlocked
+# Viterbi/deframer never reaches a clean EOF), so without this a no-signal pass
+# pins a CPU core forever. timeout -k SIGKILLs if SatDump ignores SIGTERM.
+DECODE_TIMEOUT="${WXSAT_DECODE_TIMEOUT:-900}"
 # SatDump 2.0-alpha resolves its plugin dir as ./plugins relative to cwd (the
 # build bakes no absolute path), so we run it from a dir holding that symlink.
 SATDUMP_WD="${SATDUMP_WD:-/opt/wxsat/sdwd}"
@@ -108,11 +113,14 @@ have_image() { [[ -n "$(find "$OUT" -name '*.png' -size +10k 2>/dev/null | head 
 
 decode_with() {
   local pl="$1"
-  echo "wxsat-rack: decoding $(du -h "$IQ" | cut -f1) baseband with ${pl} (${BB_FORMAT} @ ${SAMPLERATE})"
+  echo "wxsat-rack: decoding $(du -h "$IQ" | cut -f1) baseband with ${pl} (${BB_FORMAT} @ ${SAMPLERATE}, timeout ${DECODE_TIMEOUT}s)"
   # SatDump 2.0 needs --opt=value (space form leaks the value), and the plugin
   # dir is ./plugins relative to cwd -> run from SATDUMP_WD. I/O paths are absolute.
-  ( cd "$SATDUMP_WD" && satdump pipeline "$pl" baseband "$IQ" "$OUT" \
-      --baseband_format="$BB_FORMAT" --samplerate="$SAMPLERATE" ) || true
+  # timeout guards against a no-lock baseband grinding forever (see DECODE_TIMEOUT).
+  ( cd "$SATDUMP_WD" && timeout -k 15 "$DECODE_TIMEOUT" satdump pipeline "$pl" baseband "$IQ" "$OUT" \
+      --baseband_format="$BB_FORMAT" --samplerate="$SAMPLERATE" )
+  local drc=$?
+  [[ $drc -eq 124 || $drc -eq 137 ]] && echo "wxsat-rack: ${pl} decode hit ${DECODE_TIMEOUT}s timeout — killed" >&2
   if have_image; then
     echo "wxsat-rack: ${pl} produced an image"
     return 0
