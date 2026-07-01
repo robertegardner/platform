@@ -38,7 +38,12 @@ module "pi_acquisition" {
   pi_host              = var.pi_host
   ssh_user             = var.pi_ssh_user
   ssh_private_key_path = var.ssh_private_key_path
-  devices              = local.present_devices
+  # ONLY the SoapyRemote SDR sources this Pi (radio.srvr) actually serves — the
+  # radio + scanner domains (dx-r2/hf-plus/airspy-r2, each with a `port`). Handing
+  # it ALL present_devices broke `templatefile` on any full plan/apply: the goes /
+  # adsb-* / davis-vantage devices (served by pi_goes/pi_adsb/pi_weather) carry no
+  # `port`, and provision-pi.sh.tpl dereferences `${dev.port}` unconditionally.
+  devices = merge(local.radio_devices, local.scanner_devices)
 }
 
 # Tier 1 (extra) — Weather-sat acquisition on the outdoor ADS-B Pi (p24). Bare
