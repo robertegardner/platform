@@ -1,10 +1,11 @@
 #!/bin/bash
-# wxsat_capture_rack.sh — record a Meteor-M LRPT pass from p24's rtl_tcp and
-# decode it with SatDump on the rack (.84).
+# wxsat_capture_rack.sh — record a Meteor-M LRPT pass from the Nooelec's rtl_tcp
+# (on the GOES Pi, goes.srvr, since 2026-07-01) and decode it with SatDump on the
+# rack (.84).
 #
 # UNLIKE the Pi's wxsat_capture.sh there is NO SDR contention: the Nooelec is
-# dedicated, so we never stop/restart a stream. We just record CU8 from p24's
-# rtl_tcp into a baseband file, then decode it offline with SatDump 2.0:
+# dedicated, so we never stop/restart a stream. We just record CU8 from the
+# rtl_tcp source into a baseband file, then decode it offline with SatDump 2.0:
 #
 #   satdump pipeline meteor_m2-x_lrpt baseband <iq> <out> \
 #           --baseband_format u8 --samplerate 1024000
@@ -92,7 +93,7 @@ while [[ "$(free_gb)" =~ ^[0-9]+$ && "$(free_gb)" -lt "$need_gb" ]]; do
   rm -f "$oldest"
 done
 
-echo "wxsat-rack: recording ${DUR}s from rtl_tcp ${WXSAT_RTLTCP_HOST:-p24.srvr}:${WXSAT_RTLTCP_PORT:-1234} -> $IQ"
+echo "wxsat-rack: recording ${DUR}s from rtl_tcp ${WXSAT_RTLTCP_HOST:-goes.srvr}:${WXSAT_RTLTCP_PORT:-1234} -> $IQ"
 python3 /opt/wxsat/wxsat_record_rtltcp.py "$IQ" "$DUR"
 rc=$?
 if [[ ! -s "$IQ" ]]; then
