@@ -102,7 +102,9 @@ if [ -z "$${idx}" ]; then
   exit 1
 fi
 echo "goes-satdump: SMArTee serial=$${GOES_SERIAL} -> librtlsdr index $${idx}"
-exec /usr/bin/satdump "$@" --source_id "$${idx}"
+# SatDump 2.0-alpha requires --opt=value; space-separated "--source_id $${idx}"
+# corrupts the parser ("Could not find a handler for source type : rtlsdr").
+exec /usr/bin/satdump "$@" --source_id=$${idx}
 EOF
 chmod +x /usr/local/sbin/goes-satdump.sh
 echo "    wrote /usr/local/sbin/goes-satdump.sh (serial-pin, GOES_SERIAL=${goes_serial})"
