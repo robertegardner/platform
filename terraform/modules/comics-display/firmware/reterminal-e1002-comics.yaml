@@ -24,8 +24,8 @@
 
 substitutions:
   name: comics-display
-  # Point this at your comics-display LXC. /next.png rotates on each fetch.
-  comic_url: "http://192.168.6.XX:8080/next.png"
+  # Points at the comics-display LXC (907). /next.png rotates on each fetch.
+  comic_url: "http://192.168.6.89:8080/next.png"
   # How long to sleep between comics. E-paper + battery want this LONG (hours),
   # not a slideshow — a Spectra-6 full refresh is ~15-30 s and wears the panel.
   refresh_hours: "6"
