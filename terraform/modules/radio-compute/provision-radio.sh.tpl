@@ -761,10 +761,11 @@ WXSAT_SAMPLERATE=${wxsat_samplerate}
 # mean|IQ|~40). Don't raise without re-checking clip% at 137.9.
 WXSAT_GAIN_TENTHS=72
 FREQ_MHZ=137.9
+# Validation phase: operator lowers MIN_ELEV_DEG (e.g. 8) + confirms DRY_RUN=0 live.
 MIN_ELEV_DEG=20
 PREDICT_HOURS=48
 M2_4_ENABLED=1
-M2_3_ENABLED=0
+M2_3_ENABLED=1
 LAT=37.31
 LON=-89.55
 ALT_KM=0.1
