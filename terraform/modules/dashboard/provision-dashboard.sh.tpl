@@ -34,6 +34,7 @@ DASH_WX_BASE=${wx_base}
 DASH_WEATHER_BASE=${weather_base}
 DASH_ADSB_BASE=${adsb_base}
 DASH_ICECAST_BASE=${icecast_base}
+DASH_COMICS_BASE=${comics_base}
 # Public "open" targets (dive-in links) + the inline audio mount (all TLS).
 DASH_OPEN_RADIO=https://radio.rg2.io/dash
 DASH_OPEN_SCANNER=https://ems.rg2.io

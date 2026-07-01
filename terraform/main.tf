@@ -241,6 +241,28 @@ module "dashboard" {
   weather_base = "http://${var.weather_compute_ip}"
   adsb_base    = "http://${var.adsb_feeder_ip}:8080"
   icecast_base = "http://${var.distribution_ip}:8000"
+  comics_base  = "http://${var.comics_display_ip}:8080"
+}
+
+# Tier 3 (extra) — comics-display LXC: scrapes a rotating pool of classic comics
+# (XKCD, Calvin and Hobbes, The Far Side, or any og:image page) and renders each
+# to the Seeed reTerminal E1002's 800x480 Spectra-6 palette, serving the current
+# pick at a stable URL the panel pulls on each deep-sleep wake (comics.rg2.io).
+# No depends_on anything: a down comic host degrades to the last good frame.
+module "comics_display" {
+  source = "./modules/comics-display"
+
+  vmid                 = var.vmid_base + 7
+  ip                   = var.comics_display_ip
+  prefix               = var.prefix
+  gw                   = var.gw_server
+  vlan_id              = var.vlan_server
+  node                 = var.pm_node
+  storage              = var.lxc_storage
+  template             = var.lxc_template
+  bridge               = var.pve_bridge
+  ssh_public_key       = var.ssh_public_key
+  ssh_private_key_path = var.ssh_private_key_path
 }
 
 # Tier 1 (extra) — pi-weather: the LOCAL Davis collector on the Pi Zero (weather2).

@@ -133,6 +133,7 @@ locals {
     weather_base   = var.weather_base
     adsb_base      = var.adsb_base
     icecast_base   = var.icecast_base
+    comics_base    = var.comics_base
   })
 }
 

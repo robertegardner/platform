@@ -53,32 +53,20 @@ against the public pages and degrade to the last good frame on failure.
 
 ## Deploy
 
-Not wired into the root `main.tf` yet — pick a free vmid/IP (the platform LXCs
-run 900–906; **907 / 192.168.6.89** is the next free slot) and add:
+Wired into the root `main.tf` as `module.comics_display` — **vmid `vmid_base+7`
+(907) / `192.168.6.89`** (`var.comics_display_ip`). From thebeast as `deploy`:
 
-```hcl
-module "comics_display" {
-  source = "./modules/comics-display"
-
-  vmid     = 907
-  ip       = "192.168.6.89"
-  gw       = var.gw
-  vlan_id  = 0                 # Server VLAN, native untagged
-  node     = var.node
-  storage  = var.storage
-  template = var.template
-  bridge   = var.bridge
-
-  ssh_public_key       = var.ssh_public_key
-  ssh_private_key_path = var.ssh_private_key_path
-}
+```bash
+terraform apply
+# or re-provision only:
+terraform taint 'module.comics_display.null_resource.provision' && terraform apply
 ```
 
-Then, from thebeast as `deploy`: `terraform apply`
-(or re-provision only: `terraform taint 'module.comics_display.null_resource.provision' && terraform apply`).
-
-Add an NPM proxy host (e.g. `comics.rg2.io → 192.168.6.89:8080`) if you want it
-on the dashboard / behind TLS.
+The unified dashboard (`home.rg2.io`) already carries a **Comics tile** showing
+the panel's current comic + source-ready count (its `open` link points at the
+LAN UI until an NPM host exists). To put it behind TLS, add an NPM proxy host
+(e.g. `comics.rg2.io → 192.168.6.89:8080`) and set `DASH_OPEN_COMICS` on the
+dashboard box.
 
 ### Run standalone (no Terraform)
 

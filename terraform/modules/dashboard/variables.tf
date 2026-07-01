@@ -120,3 +120,9 @@ variable "icecast_base" {
   type        = string
   default     = "http://192.168.6.82:8000"
 }
+
+variable "comics_base" {
+  description = "comics-display base (api/state + current.png thumb)"
+  type        = string
+  default     = "http://192.168.6.89:8080"
+}
