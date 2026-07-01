@@ -32,6 +32,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, "/opt/wxsat")
 import wxsat_predict as predict  # noqa: E402
+import wxsat_notify  # noqa: E402
 
 log = logging.getLogger("wxsat.sched.rack")
 
@@ -103,6 +104,16 @@ def record_outcome(p, outcome, reason=None, image=None, thumb=None, outdir=None)
     _save_index(caps)
     log.info("recorded %s for %s (AOS %s, max %.0f deg)%s", outcome, p["satellite"],
              p["aos_iso"], p.get("max_elev") or 0, f" — {reason}" if reason else "")
+    # Decode-complete push for REAL outcomes (skip dry-run "would_capture").
+    if outcome != "would_capture":
+        wxsat_notify.notify(
+            "decode",
+            f"Meteor decode: {rec['satellite']}",
+            f"{outcome} — elev {round(rec.get('max_elev') or 0)}deg"
+            + (f", {image}" if image else (f" ({reason})" if reason else "")),
+            priority=("default" if outcome == "image" else "low"),
+            tags=("satellite" if outcome == "image" else "warning"),
+        )
     return rec
 
 
@@ -147,6 +158,12 @@ def do_capture(p, cfg):
                WXSAT_NORAD=str(p.get("norad") or ""))
     log.info("CAPTURE %s -> %s (%ss)", p["satellite"], out_dir, duration)
     write_status(cfg, "capturing", capturing=p)
+    wxsat_notify.notify(
+        "pass",
+        f"Meteor pass: {p['satellite']}",
+        f"AOS now — max elev {round(p.get('max_elev') or 0)}deg, recording {duration}s",
+        tags="artificial_satellite",
+    )
     try:
         # Generous decode budget: a ~16-min record + up to two full ~1.8 GB
         # SatDump pipelines (72k then 80k fallback) can take ~15 min on the LXC;
