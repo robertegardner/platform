@@ -18,7 +18,7 @@
 - **Terraform:** runs on **thebeast** as `deploy`; `terraform.tfvars` + state are **thebeast-only, never committed, never `rsync --delete`**. Validate with `terraform validate`; **never** `terraform fmt`. Ship the tree with `rsync -az terraform tools docs deploy@192.168.6.163:/home/deploy/platform/`.
 - **SSH reach:** codeserver → thebeast by IP `192.168.6.163` (deploy user); GOES Pi + LXCs reached *through* thebeast (`ssh deploy@163 'ssh -i ~/.ssh/id_rsa_homelab <user>@<host>'`). GOES Pi user = `rgardner`; radio-compute (.84) root via `id_rsa_homelab`.
 - **Never** `pct exec` / root-SSH to thebeast; never destroy/recreate the GOES Pi's `null_resource` (bare metal, live).
-- **Targeted re-provision:** `terraform taint 'module.NAME.null_resource.provision[0]' && terraform apply` (the `[0]` index — these modules use `count`).
+- **Targeted re-provision:** bare-metal pi modules use `count`, so index them: `module.pi_goes.null_resource.provision[0]`, `module.pi_wxsat.null_resource.provision[0]`. Container modules (`radio_compute`, `dashboard`) have NO count — address them WITHOUT the index: `module.radio_compute.null_resource.provision`. (Targeting a non-existent `[0]` silently no-ops as "No changes".)
 
 ---
 
@@ -470,7 +470,7 @@ PYEOF
 - [ ] **Step 7: Validate, deploy, live test.**
 
 ```bash
-rsync -az terraform deploy@192.168.6.163:/home/deploy/platform/ && ssh deploy@192.168.6.163 'cd /home/deploy/platform/terraform && terraform validate && terraform apply -auto-approve -target="module.radio_compute.null_resource.provision[0]"'
+rsync -az terraform deploy@192.168.6.163:/home/deploy/platform/ && ssh deploy@192.168.6.163 'cd /home/deploy/platform/terraform && terraform validate && terraform apply -auto-approve -target="module.radio_compute.null_resource.provision"'
 ```
 Then set ntfy live + send a test push:
 ```bash
@@ -624,7 +624,7 @@ DASH_OPEN_METEOR=https://radio.rg2.io/wxsat
 - [ ] **Step 6: Validate, deploy, verify.**
 
 ```bash
-rsync -az terraform deploy@192.168.6.163:/home/deploy/platform/ && ssh deploy@192.168.6.163 'cd /home/deploy/platform/terraform && terraform validate && terraform apply -auto-approve -target="module.dashboard.null_resource.provision[0]"'
+rsync -az terraform deploy@192.168.6.163:/home/deploy/platform/ && ssh deploy@192.168.6.163 'cd /home/deploy/platform/terraform && terraform validate && terraform apply -auto-approve -target="module.dashboard.null_resource.provision"'
 ssh deploy@192.168.6.163 'ssh -i ~/.ssh/id_rsa_homelab root@192.168.6.88 "curl -s localhost:8080/api/dashboard | python3 -m json.tool | grep -A2 Meteor"'
 ```
 Expected: the aggregate JSON contains the Meteor tile with a state + headline. Then load `home.rg2.io` and confirm the Meteor tile renders with upcoming passes; if a capture exists, the thumbnail loads via `/api/proxy/meteor-latest.png`.
