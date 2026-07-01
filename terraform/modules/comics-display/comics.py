@@ -29,6 +29,7 @@ import io
 import json
 import os
 import random
+import re
 import threading
 import time
 import urllib.request
@@ -90,7 +91,7 @@ DEFAULT_SOURCES = [
     {"id": "calvinandhobbes", "name": "Calvin and Hobbes", "type": "gocomics",
      "slug": "calvinandhobbes", "palette": "auto", "enabled": True},
     {"id": "farside", "name": "The Far Side", "type": "farside",
-     "palette": "mono", "enabled": True},
+     "palette": "auto", "enabled": True},
 ]
 
 # ---- State ----------------------------------------------------------------
@@ -116,8 +117,22 @@ def _local_now():
 
 def _http_get(url, as_json=False):
     """GET url. Returns bytes (or parsed JSON). Raises on failure."""
-    req = urllib.request.Request(url, headers={"User-Agent": UA,
-                                               "Accept": "*/*"})
+    # Full browser-like headers: gocomics (Cloudflare-fronted) 403s a bare
+    # UA+*/* request; sending the Accept/Accept-Language/Sec-Fetch set a real
+    # Chrome sends gets a 200. Accept-Encoding=identity so we never have to
+    # gunzip (stdlib urllib doesn't auto-decompress). Harmless for xkcd's JSON
+    # API and direct image fetches.
+    req = urllib.request.Request(url, headers={
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                  "image/avif,image/webp,image/png,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "identity",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Upgrade-Insecure-Requests": "1",
+    })
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         data = r.read()
     if as_json:
@@ -194,13 +209,15 @@ def _fetch_gocomics(src):
 
 
 def _fetch_farside(src):
-    # thefarside.com rotates a "Daily Dose" of cartoons on the homepage. Grab a
-    # cartoon image (their CDN path contains /assets/ or /cartoons/); fall back
-    # to og:image. Pick randomly so repeated pulls vary within the day.
+    # thefarside.com rotates a "Daily Dose" of cartoons on the homepage. The real
+    # strips are hosted at siteassets.thefarside.com/uploads/post_preview_images/...
+    # (verified 2026-07-01). The old /cartoon//assets//tfs match no longer appears,
+    # so it fell back to og:image — a branding logo card, NOT a strip. Match the
+    # real path directly (regex over the raw HTML, robust to lazy-load/data-src),
+    # pick randomly so repeated pulls vary within the day.
     html = _http_get("https://www.thefarside.com/").decode("utf-8", "replace")
-    imgs = [u for u in _all_imgs(html, "https://www.thefarside.com/")
-            if any(k in u.lower() for k in ("/cartoon", "/assets/", "tfs/"))
-            and u.lower().split("?")[0].endswith((".jpg", ".jpeg", ".png", ".gif"))]
+    imgs = list(set(re.findall(
+        r'https?://[^\s"\'<>)]+?/uploads/post_preview_images/[^\s"\'<>)]+', html)))
     if imgs:
         url = random.choice(imgs)
         return _http_get(url), url
