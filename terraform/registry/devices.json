@@ -90,24 +90,24 @@
       "usb_controller": "B"
     },
     "nooelec-wx": {
-      "_comment": "SHELVED 2026-06-19 (present:false). Nooelec NESDR SMArt v5 (RTL2838, Meteor V-dipole) on the OUTDOOR ADS-B Pi p24.srvr (192.168.6.141). PAUSED because the NOOELEC DONGLE ITSELF IS FLAKY (per the user: same failures in the attic on a different host — it drops off the bus / -4/-1/-71; an RTL v4 is ON ORDER to replace it). NOT a p24-USB-marginal problem: p24's two ADS-B dongles run for weeks, and this Nooelec failed in every config (3-dongle, solo, blue USB-3). It wedged overnight 2026-06-18/19 (rtl_tcp ConnectionReset -> all captures got no IQ). The afternoon passes that DID record (clean, gain 7.2dB/250k) decoded NOSYNC = reception unresolved. UN-SHELVE when the RTL v4 arrives: swap it in (update serial/device), present:true, terraform apply pi_wxsat + radio_compute, re-enable wxsat-rtltcp (p24) + wxsat-scheduler (.84). User unplugged the Nooelec + re-plugged both ADS-B dongles 2026-06-19; p24 is back to its ADS-B feeder role. The whole acquire->decode->GUI pipeline is proven. See memory wxsat-meteor-on-p24.",
-      "present": false,
-      "host": "p24.srvr",
+      "_comment": "Nooelec NESDR SMArt v5 (RTL2838, serial 22012952) on the GOES Pi goes.srvr (192.168.6.134), with a tuned Meteor antenna + an EXTERNALLY POWERED LNA (so bias_tee stays false; the Nooelec has none). Served over rtl_tcp by wxsat-rtltcp.service (serial-pinned + hard-fail) so it can NEVER steal the GOES SMArTee (47360874, which goes.service pins by serial); the rack radio-compute wxsat scheduler records this rtl_tcp and decodes Meteor-M2 LRPT on .84. Enumeration is NOT stable — the Nooelec came up index 0, the SMArTee index 1 — hence strict serial selection on both. RTL gain stays LOW (7.2 dB); the LNA provides gain (40 dB stacked clips). Moved here from p24 2026-07-01 (p24's ADS-B role untouched). HISTORY: this dongle showed flaky tuner comms on p24 (rtl_test r82xx_init failed=-1, prior NOSYNC); watch it. See memory wxsat-meteor-on-p24.",
+      "present": true,
+      "host": "goes.srvr",
       "soapy_args": "driver=rtlsdr",
       "serial": "22012952",
       "antenna": "single",
-      "feed": "V-dipole",
-      "filter": "none",
+      "feed": "tuned Meteor antenna + externally powered LNA",
+      "filter": "external LNA (powered)",
       "role": "meteor-lrpt",
       "domain": "wxsat",
       "transport": "rtl-tcp",
       "wire_format": "CU8",
-      "endpoint": "tcp://p24.srvr:1234",
+      "endpoint": "tcp://goes.srvr:1234",
       "port": 1234,
       "freq_hz": 137900000,
       "sample_rate_default": 250000,
       "bias_tee": false,
-      "usb_controller": "p24"
+      "usb_controller": "goes"
     },
     "goes": {
       "_comment": "GOES-19 HRIT/EMWIN geostationary downlink on goes.srvr (a dedicated Pi 5): Nooelec SmArTee RTL-SDR + Sawbird GOES LNA + dish. UNLIKE every other device, GOES is geostationary/continuous, so SatDump runs `live goes_hrit` ON THE PI (decode does NOT move to the rack). The Pi's goes.service command (gain/freq/samplerate) is hand-tuned and KEPT-IF-ABSENT by the pi-goes provisioner — do not auto-rewrite it from this registry (these values are documentary defaults used only on a fresh install). The rack LXC goes-archive (903/.85) rsync-PULLS goes_output and serves the gallery + goes.rg2.io API + the weather2 headline image. domain:goes keeps it out of the radio-compute device loops.",
