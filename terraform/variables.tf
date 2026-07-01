@@ -141,13 +141,13 @@ variable "pi_ssh_user" {
 
 # --- Weather-sat acquisition node (outdoor ADS-B Pi, p24) ---------------------
 variable "wxsat_host" {
-  description = "Hostname/IP of the outdoor ADS-B Pi hosting the Nooelec/Meteor dipole. Use the IP since p24.srvr may not resolve from thebeast."
+  description = "Hostname/IP of the Pi hosting the Nooelec/Meteor dongle. On the GOES Pi (goes.srvr) since 2026-07-01. Use the IP since goes.srvr may not resolve from thebeast."
   type        = string
-  default     = "192.168.6.141"
+  default     = "192.168.6.134"
 }
 
 variable "wxsat_ssh_user" {
-  description = "SSH user on p24 (passwordless sudo for installs/systemctl)"
+  description = "SSH user on the wxsat host (passwordless sudo for installs/systemctl)"
   type        = string
   default     = "rgardner"
 }

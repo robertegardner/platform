@@ -13,6 +13,7 @@ locals {
     frequency_hz = try(local.dev.freq_hz, 1694100000)
     samplerate   = try(local.dev.sample_rate_default, 2400000)
     gain         = try(local.dev.gain, 40)
+    goes_serial  = try(local.dev.serial, "47360874")
     output_dir   = var.goes_output_dir
     prune_hours  = var.prune_retention_hours
     ssh_user     = var.ssh_user

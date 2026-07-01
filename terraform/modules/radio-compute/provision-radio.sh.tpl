@@ -733,7 +733,10 @@ EOF
 cat > /opt/wxsat/wxsat_live.py <<'PYEOF'
 ${wxsat_live_py}
 PYEOF
-chmod +x /opt/wxsat/wxsat_record_rtltcp.py /opt/wxsat/wxsat_scheduler.py /opt/wxsat/wxsat_capture_rack.sh /opt/wxsat/wxsat_live.py
+cat > /opt/wxsat/wxsat_notify.py <<'PYEOF'
+${wxsat_notify_py}
+PYEOF
+chmod +x /opt/wxsat/wxsat_record_rtltcp.py /opt/wxsat/wxsat_scheduler.py /opt/wxsat/wxsat_capture_rack.sh /opt/wxsat/wxsat_live.py /opt/wxsat/wxsat_notify.py
 
 # Storage lives on the rack: products + the captures index + the TLE cache.
 install -d -o radio -g radio -m 0755 /var/lib/sdr-streams/wxsat /var/lib/sdr-streams/wxsat/tle
@@ -758,10 +761,11 @@ WXSAT_SAMPLERATE=${wxsat_samplerate}
 # mean|IQ|~40). Don't raise without re-checking clip% at 137.9.
 WXSAT_GAIN_TENTHS=72
 FREQ_MHZ=137.9
+# Validation phase: operator lowers MIN_ELEV_DEG (e.g. 8) + confirms DRY_RUN=0 live.
 MIN_ELEV_DEG=20
 PREDICT_HOURS=48
 M2_4_ENABLED=1
-M2_3_ENABLED=0
+M2_3_ENABLED=1
 LAT=37.31
 LON=-89.55
 ALT_KM=0.1
@@ -773,6 +777,9 @@ WXSAT_MIN_FREE_GB=2
 AOS_BUFFER_S=45
 POST_LOS_S=15
 REFRESH_INTERVAL_S=1800
+# ntfy pass/decode alerts (best-effort; empty = disabled). Set both to enable.
+NTFY_URL=
+NTFY_TOPIC=
 EOF
   chmod 0644 /etc/radio-compute/wxsat.env
 fi

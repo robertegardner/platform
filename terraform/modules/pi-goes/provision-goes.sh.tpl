@@ -53,6 +53,36 @@ if systemctl list-unit-files satdump-geos.service >/dev/null 2>&1; then
   echo "    removed leftover satdump-geos.service"
 fi
 
+# --- 3a) Serial-pin wrapper -------------------------------------------------
+# goes.service must bind the GOES SMArTee (not a second RTL like the Meteor
+# Nooelec). SatDump's RTL selector is --source_id <librtlsdr index>; index order
+# is NOT stable with two identical RTL2838s, so resolve it from the unique serial
+# at each start and HARD-FAIL rather than grab index 0. (Same pattern as
+# pi-wxsat's wxsat-rtltcp.sh.)
+install -d /etc/goes
+cat > /etc/goes/pin.env <<EOF
+GOES_SERIAL=${goes_serial}
+EOF
+cat > /usr/local/sbin/goes-satdump.sh <<'EOF'
+#!/bin/bash
+# platform-managed (pi-goes): pin SatDump to the GOES SMArTee by serial.
+set -u
+. /etc/goes/pin.env 2>/dev/null || true
+: "$${GOES_SERIAL:?GOES_SERIAL unset}"
+idx="$(timeout 5 rtl_test 2>&1 | grep "SN: $${GOES_SERIAL}" | grep -oE '^[[:space:]]*[0-9]+:' | tr -dc '0-9' | head -c3 || true)"
+if [ -z "$${idx}" ]; then
+  echo "goes-satdump: no RTL with serial $${GOES_SERIAL} — refusing to start (would risk grabbing the Meteor Nooelec)" >&2
+  exit 1
+fi
+echo "goes-satdump: SMArTee serial=$${GOES_SERIAL} -> librtlsdr index $${idx}"
+# SatDump 2.0-alpha requires --opt=value for extra options; a space-separated
+# "--source_id $${idx}" corrupts the parser ("Could not find a handler for
+# source type : rtlsdr"). Equals syntax is mandatory here.
+exec /usr/bin/satdump "$@" --source_id=$${idx}
+EOF
+chmod +x /usr/local/sbin/goes-satdump.sh
+echo "    wrote /usr/local/sbin/goes-satdump.sh (serial-pin, GOES_SERIAL=${goes_serial})"
+
 # goes.service: KEEP-IF-ABSENT. The live command's gain/frequency are hand-tuned
 # for this dish + Sawbird GOES LNA; never overwrite a working unit. The default
 # written below (only on a fresh Pi) mirrors the validated live command. If a
@@ -62,6 +92,16 @@ fi
 GS=/etc/systemd/system/goes.service
 if [ -f "$GS" ]; then
   echo "    $GS present — keeping the hand-tuned unit"
+  # Idempotent pin: route the existing hand-tuned ExecStart through the wrapper
+  # (which appends --source_id). Only touches the binary path; freq/gain/rate
+  # are preserved. Marker = the wrapper path already being present.
+  if grep 'ExecStart=/usr/bin/satdump ' "$GS" >/dev/null 2>&1; then
+    sed -i 's#ExecStart=/usr/bin/satdump #ExecStart=/usr/local/sbin/goes-satdump.sh #' "$GS"
+    systemctl daemon-reload
+    echo "    patched goes.service ExecStart -> serial-pin wrapper"
+  else
+    echo "    goes.service ExecStart already pinned (or custom) — left as-is"
+  fi
 else
   cat > "$GS" <<EOF
 [Unit]
@@ -73,7 +113,7 @@ Wants=network-online.target
 [Service]
 User=$${RUN_USER}
 ExecStartPre=/bin/mkdir -p ${output_dir}
-ExecStart=/usr/bin/satdump live goes_hrit ${output_dir} --source rtlsdr \
+ExecStart=/usr/local/sbin/goes-satdump.sh live goes_hrit ${output_dir} --source rtlsdr \
   --samplerate ${samplerate} --frequency ${frequency_hz} --gain ${gain} \
   --http_server 0.0.0.0:8080
 Restart=always
@@ -82,7 +122,7 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF
-  echo "    wrote default $GS (fresh install)"
+  echo "    wrote default $GS (fresh install, serial-pinned)"
 fi
 systemctl daemon-reload
 systemctl enable goes.service >/dev/null 2>&1 || true

@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# pi-wxsat provisioner — p24.srvr (the OUTDOOR ADS-B Pi), bare metal.
+# pi-wxsat provisioner — goes.srvr (the dedicated GOES decode Pi), bare metal.
 #
-# Brings up the Nooelec RTL2838 (Meteor V-dipole) as an rtl_tcp source for the
-# rack's SatDump decoder. p24's job here is THIN: serve the dedicated Nooelec on
-# the LAN; all decode + storage happen on radio-compute (.84).
+# Brings up the Nooelec RTL2838 (tuned Meteor antenna + powered LNA) as an
+# rtl_tcp source for the rack's SatDump decoder. The Pi's job here is THIN: serve
+# the dedicated Nooelec on the LAN; all decode + storage happen on radio-compute
+# (.84).
 #
-# HARD RULE: never disturb the two live ADS-B dongles (1090 @ serial 00001090,
-# UAT 978 @ serial 00000001). We select the Nooelec STRICTLY by its unique
-# reprogrammed serial and hard-fail rather than ever fall back to device 0.
+# HARD RULE: never disturb the GOES downlink. goes.service is serial-pinned to
+# the SMArTee (47360874); we select the Nooelec (serial 22012952) STRICTLY by its
+# unique serial and hard-fail rather than ever fall back to device 0. Enumeration
+# is not stable (the Nooelec has come up index 0, the SMArTee index 1).
 #
 # Everything is install-if-absent / re-run safe. NB: remote-exec runs WITHOUT
 # `set -e` — chained `&& rm` at the call site guards real failures; here we keep
@@ -22,8 +24,8 @@ GAIN="${gain}"
 echo "==> pi-wxsat provisioning on $(hostname) — Nooelec serial=$${SERIAL} rtl_tcp ${bind_addr}:${port}"
 
 # --- 1) rtl-sdr tools (rtl_tcp / rtl_eeprom / rtl_test) ----------------------
-# p24 already feeds ADS-B via librtlsdr, so these are almost certainly present.
-# Install only if something is missing (never reinstall over a working feeder).
+# The GOES Pi already uses librtlsdr for goes.service, so these are almost
+# certainly present. Install only if something is missing (never reinstall).
 need_pkg=0
 for b in rtl_tcp rtl_eeprom rtl_test; do
   command -v "$b" >/dev/null 2>&1 || need_pkg=1
@@ -36,14 +38,16 @@ else
 fi
 
 # --- 2) Blacklist the kernel DVB driver -------------------------------------
-# A freshly-plugged RTL gets seized by dvb_usb_rtl28xxu (seen flapping on p24:
-# rtl2832_sdr -> swradio0 -> disconnect). Blacklist so librtlsdr keeps it. Safe
-# for the running feeders — they already use librtlsdr/usbfs, not these modules.
+# A freshly-plugged RTL gets seized by dvb_usb_rtl28xxu. Blacklist so librtlsdr
+# keeps it. Safe for goes.service — it already uses librtlsdr/usbfs, not these
+# modules. NB: pi-goes writes this SAME file (identical DVB blacklist); this
+# block is keep-if-absent, so whichever module runs first wins and the other
+# no-ops — the effect is the same.
 BL=/etc/modprobe.d/blacklist-rtlsdr-dvb.conf
 if [ ! -f "$BL" ]; then
   cat > "$BL" <<'EOF'
 # platform-managed (pi-wxsat): keep RTL-SDR dongles off the DVB-T kernel driver
-# so librtlsdr/rtl_tcp can claim the Nooelec. The ADS-B feeders already use
+# so librtlsdr/rtl_tcp can claim the Nooelec. goes.service already uses
 # librtlsdr; this only stops the kernel from grabbing a fresh dongle.
 blacklist dvb_usb_rtl28xxu
 blacklist rtl2832
@@ -58,12 +62,11 @@ else
 fi
 
 # --- 2b) usbfs buffer for multi-dongle USB ----------------------------------
-# p24 streams 3 RTL dongles (2 ADS-B + the Nooelec). The default usbfs pool
-# (usbfs_memory_mb=16) is too small for them together -> rtl_tcp "Failed to
-# submit transfer", it resets every client, and a Meteor capture fails the same
-# way. Raise it persistently (tmpfiles.d applies it at boot, before the SDR
-# services) AND now. (USB power/signal -71 enumerate drops are a SEPARATE,
-# hardware issue — needs a powered hub.)
+# The GOES Pi now streams 2 RTL dongles (the GOES SMArTee @2.4 Msps + the Nooelec
+# @250k). A small usbfs pool (default 16 MB) causes rtl_tcp "Failed to submit
+# transfer" + client resets. Raise it persistently (tmpfiles.d applies it at boot,
+# before the SDR services) AND now — 1000 MB is ample for both. (USB power/signal
+# -71 enumerate drops are a SEPARATE hardware issue — needs a powered hub.)
 US=/etc/tmpfiles.d/usbfs-sdr.conf
 if ! grep -qs usbfs_memory_mb "$US"; then
   echo "w /sys/module/usbcore/parameters/usbfs_memory_mb - - - - 1000" > "$US"
@@ -73,17 +76,33 @@ systemd-tmpfiles --create "$US" 2>/dev/null || \
   echo 1000 > /sys/module/usbcore/parameters/usbfs_memory_mb 2>/dev/null || true
 echo "    usbfs_memory_mb=$(cat /sys/module/usbcore/parameters/usbfs_memory_mb 2>/dev/null)"
 
+# --- 2c) USB current budget (Pi 5) ------------------------------------------
+# Two RTL dongles (the GOES SMArTee @2.4 Msps + this Nooelec) exceed the Pi 5's
+# DEFAULT 600 mA total-USB cap -> over-current trips that silently kill the GOES
+# stream ("cb transfer status: 1", SatDump stalls while systemd still shows
+# active). Raise the cap to 1.6 A. NB: takes effect only after a REBOOT, and
+# asserts the supply can source it — this Pi runs on a PoE HAT; a >=25W/802.3at
+# HAT has the headroom (verified throttled=0x0 with BOTH dongles streaming
+# 2026-07-01). If it's an 802.3af/15W HAT, use a powered USB hub instead.
+CT=/boot/firmware/config.txt
+if [ -f "$CT" ] && ! grep -q usb_max_current_enable "$CT"; then
+  printf '\n# platform (pi-wxsat): full USB current (1.6A) for dual RTL (GOES SMArTee + Meteor Nooelec). Reboot to apply.\nusb_max_current_enable=1\n' >> "$CT"
+  echo "    added usb_max_current_enable=1 to $CT (REBOOT required to apply)"
+else
+  echo "    usb_max_current_enable already set (or $CT absent) — leaving it"
+fi
+
 # --- 3) (No EEPROM reflash) -------------------------------------------------
 # The Nooelec NESDR SMArt ships a FACTORY-UNIQUE serial (22012952), distinct
-# from p24's two ADS-B dongles (00000001 UAT, 00001090 1090), so there is no
-# collision and nothing to reflash — selection is by that serial below. (Earlier
-# reflash attempts also showed this Pi's USB resets are flaky; we avoid EEPROM
-# writes entirely.)
+# from the GOES SMArTee (47360874), so there is no collision and nothing to
+# reflash — selection is by that serial below. (We avoid EEPROM writes entirely;
+# this dongle has shown flaky tuner comms historically.)
 
 # --- 4) rtl_tcp serving wrapper + env + unit --------------------------------
 # rtl_tcp -d takes a device INDEX (not a serial), and index order is not stable
-# on a multi-dongle host. The wrapper resolves the index from the unique serial
-# and HARD-FAILS if absent — never serves an arbitrary (possibly ADS-B) dongle.
+# on a multi-dongle host (the Nooelec has come up index 0, the SMArTee index 1).
+# The wrapper resolves the index from the unique serial and HARD-FAILS if absent
+# — never serves an arbitrary dongle (would risk the GOES SMArTee).
 install -d -m 0755 /etc/wxsat
 if [ -f /etc/wxsat/rtltcp.env ]; then
   echo "    /etc/wxsat/rtltcp.env exists - keeping it"

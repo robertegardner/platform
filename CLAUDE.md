@@ -299,8 +299,16 @@ and LXCs are co-VLAN, so there's no routing between acquisition and compute.
 8. ✅ `dashboard` (906/.88) — unified landing page, one MD3 tile per domain;
    `home.rg2.io`.
 
-**Open / remaining:** radio stereo mux + HD/AM (radio repo v2); the Meteor/NOAA
-wxsat path is DARK pending an RTL v4; the HF+ YouLoop AM survey.
+**Open / remaining:** radio stereo mux + HD/AM (radio repo v2); the HF+ YouLoop AM
+survey. **Meteor LRPT was REVIVED 2026-07-01 on the GOES Pi** (branch
+`meteor-lrpt-goes-pi`): a tuned Meteor antenna + powered LNA + the Nooelec
+(22012952) went on goes.srvr; `pi-wxsat` repointed there (`wxsat_host`→.134),
+`goes.service` serial-pinned to the SMArTee (47360874, `--source_id=<idx>` EQUALS
+syntax), Pi 5 USB cap raised (`usb_max_current_enable=1` — two dongles tripped the
+600mA over-current) so both stream on the PoE HAT; rack scheduler (.84) un-gated off
+`goes.srvr:1234` rtl_tcp, ntfy → meteor-cape, ☄️ tile on home.rg2.io. Chain LIVE
+end-to-end; **reception still weak/NOSYNC on low passes** (judge on a 30°+ pass) —
+see [[wxsat-meteor-on-p24]]. (NOAA-sat/RTL v4 path stays DARK.)
 
 ## NPM proxy map (user-managed; TARGET state for the Android app — see
 ## deployment_notes "Android app integration")
