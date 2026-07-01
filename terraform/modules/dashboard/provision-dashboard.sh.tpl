@@ -43,6 +43,7 @@ DASH_OPEN_GOES_AIM=http://192.168.6.134:8091/
 DASH_OPEN_WEATHER=https://w.rg2.io
 DASH_OPEN_ADSB=https://adsb.rg2.io
 DASH_OPEN_METEOR=https://radio.rg2.io/wxsat
+DASH_OPEN_COMICS=https://comics.rg2.io
 DASH_OPEN_ICECAST=https://icecast.rg2.io
 DASH_ICECAST_PUBLIC=https://icecast.rg2.io
 DASH_FM_AUDIO_URL=https://icecast.rg2.io/fm.mp3
