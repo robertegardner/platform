@@ -4,7 +4,44 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
-## 2026-07-01 (latest) — Meteor LRPT revived on the GOES Pi
+## 2026-07-02 (latest) — wxsat capture moved ONTO the GOES Pi (store-and-forward)
+
+**Why:** the 01:37Z M2-3 pass failed with "No route to host" — goes.srvr sits
+OUTSIDE on the **Garage UDB wireless bridge**, and a link flap at AOS (or any
+point in the ~15-min stream) killed the old rack-streaming capture. Same night
+the GOES SMArTee wedged at the USB level (`can't set config #1, error -71`,
+librtlsdr blank strings → serial-pin refused → goes.service restart-loop from
+~01:09Z); recovered REMOTELY with `usbreset 001/<devnum>` (needed two tries)
+— both outdoor dongles have now shown this wedge, hence the capture script's
+recovery ladder below. Also restarted .85 `goes-pull.timer` (stops
+rescheduling after repeated failures).
+
+**Change (branch `wxsat-pi-local-capture`, spec + plan in
+`docs/superpowers/`):** Meteor is now store-and-forward like GOES.
+- **Pi (pi-wxsat module):** `wxsat-scheduler.service` predicts locally
+  (shared `wxsat_predict.py`, TLE self-fetch + cache) and records from
+  **localhost** rtl_tcp via `wxsat_capture_pi.sh` →
+  `/var/lib/wxsat/captures/<ts>Z/` with `passmeta.json` +
+  `capture.done`/`capture.failed` markers; recovery ladder = bounce
+  wxsat-rtltcp → `usbreset` (STRICTLY by WXSAT_SERIAL) → bounce.
+  `wxsat-http.service` (:8078) serves `/live/` + `/captures/`;
+  `wxsat-prune.timer` keeps 72 h. Registry serial → **74111838** (SMArTee XTR
+  E4000, AGC; the flaky 22012952 died 2026-07-01).
+- **Rack (.84):** `wxsat-scheduler.service` RETIRED → `wxsat-sync.timer`
+  (5 min: TLE-fresh predict for the gallery, rsync-pull marker-complete dirs,
+  decode via `WXSAT_DECODE_ONLY=1 wxsat_capture_rack.sh`, record_outcome +
+  ntfy, `decode.done` idempotence) + `wxsat-live-relay.service` (mirrors the
+  Pi's fresh live frames into `/run/sdr-streams/wxsat_live.json` — tuner
+  `/api/wxsat/live` and the gallery unchanged, zero radio-repo edits). Sync
+  key `/var/lib/sdr-streams/wxsat/.ssh/id_wxsat` (radio user), authorized on
+  goes.srvr.
+- **Deploy:** Pi via `terraform apply -target=module.pi_wxsat`; .84 manually
+  staged (== provisioner content; full radio re-provision avoided).
+  **Verified:** forced 60 s capture → marker → pull → both-pipeline decode →
+  captures.json + `decode.done`; second sync = "none new". A UDB flap now
+  costs only the live view, never the capture.
+
+## 2026-07-01 — Meteor LRPT revived on the GOES Pi
 
 **State: chain LIVE end-to-end; reception TBD (validation phase).** Branch
 `meteor-lrpt-goes-pi` (spec+plan in `docs/superpowers/`). A tuned Meteor antenna +
