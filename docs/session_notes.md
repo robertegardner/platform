@@ -4,7 +4,42 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
-## 2026-06-30 (latest) — scanner UI cleanup + GOES gallery fixes
+## 2026-07-01 (latest) — comics-display DEPLOYED (reTerminal E1002) + live scrapers
+
+**State: LXC live, scrapers validated, panel firmware reconciled (not flashed —
+no panel on hand).** Branch `claude/reterminal-comics-display-rtcaxs`.
+
+- **Deployed** `module.comics_display` — LXC **907 / 192.168.6.89**, scoped apply
+  (2 to add, 0 destroy). `comics-display.service` active on :8080, Pillow 10.2,
+  seeded xkcd + Calvin and Hobbes + The Far Side.
+- **Live scrapers fixed** (never run against the real sites before): gocomics
+  403'd on a bare UA (Cloudflare) → `_http_get` now sends full browser headers,
+  200 for calvinandhobbes + garfield. The Far Side was serving its **branding
+  logo card** — the daily-dose images moved to
+  `siteassets.thefarside.com/uploads/post_preview_images/`; `_fetch_farside` now
+  regex-matches that path (+ added the missing `import re`). add/drop API
+  smoke-tested. xkcd ✓, calvinandhobbes ✓, farside ✓, garfield ✓.
+- **COLOUR:** render is per-source auto (mono if mean-sat < 18, else the 6-colour
+  Spectra palette). The Far Side was pinned `mono` → forced its colour strips to
+  B&W; switched to `auto` (seed + live sources.json). Verified a colour Far Side
+  renders 800×480 in exactly 6 palette colours. xkcd/Calvin dailies stay mono
+  (B&W at source). The panel is colour and is used.
+- **Dashboard reconciled to carry BOTH tiles** — the Comics tile + the meteor
+  branch's Meteor tile now coexist in one `dashboard.py` (added poll_meteor/
+  _proxy_meteor/PAGE preview + put "meteor" in the client `ORDER` array — the
+  meteor branch had omitted it, so that tile never rendered; that's why
+  home.rg2.io showed neither). Deployed; both tiles live.
+- **Firmware pins reconciled** vs Seeed's cookbook: the integrated
+  `Seeed-reTerminal-E1002` model (ESPHome ≥ 2025.11.1) PREDEFINES cs/dc/reset/busy
+  — the draft's explicit pins (esp. a non-inverted busy_pin) are the classic
+  "stuck initializing" bug (esphome#12012; busy is active-low). Removed them; kept
+  spi clk=GPIO7/mosi=GPIO9; added a commented `7.3in-spectra-e6` explicit-pin
+  fallback for older ESPHome. NOT flashed — no physical panel.
+- **Not done (user-managed):** NPM `comics.rg2.io` → .89:8080 + LE cert, then set
+  DASH_OPEN_COMICS. Cross-branch: `dashboard.py` conflicts with meteor PR #16 at
+  merge (both add a tile) — resolve to the both-tiles version here.
+
+## 2026-06-30 — scanner UI cleanup + GOES gallery fixes
 
 **State: all LIVE + merged to main.** Two threads on top of the dashboard work.
 

@@ -227,3 +227,9 @@ variable "dashboard_ip" {
   type        = string
   default     = "192.168.6.88"
 }
+
+variable "comics_display_ip" {
+  description = "Static IP of the comics-display LXC (vmid_base+7)"
+  type        = string
+  default     = "192.168.6.89"
+}
