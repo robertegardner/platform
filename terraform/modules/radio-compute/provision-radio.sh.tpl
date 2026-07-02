@@ -736,7 +736,13 @@ PYEOF
 cat > /opt/wxsat/wxsat_notify.py <<'PYEOF'
 ${wxsat_notify_py}
 PYEOF
-chmod +x /opt/wxsat/wxsat_record_rtltcp.py /opt/wxsat/wxsat_scheduler.py /opt/wxsat/wxsat_capture_rack.sh /opt/wxsat/wxsat_live.py /opt/wxsat/wxsat_notify.py
+cat > /opt/wxsat/wxsat_sync.py <<'PYEOF'
+${wxsat_sync_py}
+PYEOF
+cat > /opt/wxsat/wxsat_live_relay.py <<'PYEOF'
+${wxsat_live_relay_py}
+PYEOF
+chmod +x /opt/wxsat/wxsat_record_rtltcp.py /opt/wxsat/wxsat_scheduler.py /opt/wxsat/wxsat_capture_rack.sh /opt/wxsat/wxsat_live.py /opt/wxsat/wxsat_notify.py /opt/wxsat/wxsat_sync.py /opt/wxsat/wxsat_live_relay.py
 
 # Storage lives on the rack: products + the captures index + the TLE cache.
 install -d -o radio -g radio -m 0755 /var/lib/sdr-streams/wxsat /var/lib/sdr-streams/wxsat/tle
@@ -780,38 +786,89 @@ REFRESH_INTERVAL_S=1800
 # ntfy pass/decode alerts (best-effort; empty = disabled). Set both to enable.
 NTFY_URL=
 NTFY_TOPIC=
+# Pi-local pipeline (2026-07-02): where wxsat-sync pulls captures from and the
+# live relay's source.
+WXSAT_PI_HOST=${wxsat_rtltcp_host}
+WXSAT_PI_USER=rgardner
+WXSAT_PI_CAPTURES=/var/lib/wxsat/captures
+WXSAT_PI_LIVE_URL=http://${wxsat_rtltcp_host}:8078/live/wxsat_live.json
 EOF
   chmod 0644 /etc/radio-compute/wxsat.env
 fi
 
-cat > /etc/systemd/system/wxsat-scheduler.service <<'EOF'
+# Dedicated pull key for wxsat-sync (radio user). ONE-TIME: authorise the
+# printed pubkey on goes.srvr as rgardner (goes-archive id_goes pattern).
+install -d -m 0700 -o radio -g radio /var/lib/sdr-streams/wxsat/.ssh
+if [ ! -f /var/lib/sdr-streams/wxsat/.ssh/id_wxsat ]; then
+  sudo -u radio ssh-keygen -t ed25519 -N "" -C "wxsat-sync" \
+    -f /var/lib/sdr-streams/wxsat/.ssh/id_wxsat >/dev/null
+  echo "    ONE-TIME: authorise on goes.srvr (rgardner): $(cat /var/lib/sdr-streams/wxsat/.ssh/id_wxsat.pub)"
+fi
+
+# The streaming scheduler is superseded by the Pi-local pipeline (2026-07-02):
+# the Pi captures autonomously; this box pulls + decodes on a timer and relays
+# live telemetry. Retire the old unit if present.
+if [ -f /etc/systemd/system/wxsat-scheduler.service ]; then
+  systemctl disable --now wxsat-scheduler.service >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/wxsat-scheduler.service
+  echo "    retired wxsat-scheduler.service (replaced by wxsat-sync)"
+fi
+
+cat > /etc/systemd/system/wxsat-sync.service <<'EOF'
 [Unit]
-Description=Weather-sat (Meteor LRPT) scheduler — rack decode of p24 rtl_tcp
+Description=wxsat sync — pull Pi Meteor captures, decode, index, notify
 After=network-online.target
-Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=radio
+Group=radio
+Environment=HOME=/var/lib/sdr-streams/wxsat
+EnvironmentFile=/etc/radio-compute/wxsat.env
+ExecStart=/usr/bin/python3 /opt/wxsat/wxsat_sync.py
+TimeoutStartSec=3600
+EOF
+
+cat > /etc/systemd/system/wxsat-sync.timer <<'EOF'
+[Unit]
+Description=wxsat sync every 5 min
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+cat > /etc/systemd/system/wxsat-live-relay.service <<'EOF'
+[Unit]
+Description=wxsat live-pass telemetry relay (Pi wxsat-http -> /run/sdr-streams)
+After=network-online.target
 
 [Service]
 Type=simple
 User=radio
 Group=radio
-Environment=HOME=/var/lib/sdr-streams/wxsat
 EnvironmentFile=/etc/radio-compute/wxsat.env
-ExecStart=/usr/bin/python3 /opt/wxsat/wxsat_scheduler.py
+ExecStart=/usr/bin/python3 /opt/wxsat/wxsat_live_relay.py
 Restart=always
-RestartSec=15s
+RestartSec=10
+Nice=10
 
 [Install]
 WantedBy=multi-user.target
 EOF
+
 systemctl daemon-reload
-# Safe to run pre-cutover: with DRY_RUN=1 it only predicts + writes passes.json.
-systemctl enable wxsat-scheduler.service >/dev/null 2>&1 || true
-systemctl restart wxsat-scheduler.service || true
+systemctl enable wxsat-sync.timer wxsat-live-relay.service >/dev/null 2>&1 || true
+systemctl restart wxsat-sync.timer wxsat-live-relay.service || true
 
 # GALLERY: the tuner.env block above already disabled WXSAT_UPSTREAM, so
-# radio.rg2.io/wxsat serves THESE rack captures (upcoming passes show at once;
-# images fill in as passes decode). Re-point at the Pi only for a rollback.
-echo "    wxsat-scheduler: $(systemctl is-active wxsat-scheduler.service 2>/dev/null) (DRY_RUN gates real captures; gallery serves rack-local /var/lib/sdr-streams/wxsat)"
+# radio.rg2.io/wxsat serves the rack captures wxsat-sync pulls + decodes
+# (upcoming passes show at once; images fill in as passes land).
+echo "    wxsat: sync.timer=$(systemctl is-active wxsat-sync.timer 2>/dev/null) live-relay=$(systemctl is-active wxsat-live-relay.service 2>/dev/null)"
 %{ endif ~}
 
 echo "==> provisioning complete (toolchain staged; no units, nothing started)"

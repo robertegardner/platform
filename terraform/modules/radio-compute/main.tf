@@ -151,6 +151,8 @@ locals {
     wxsat_capture_sh   = file("${path.module}/wxsat_capture_rack.sh")
     wxsat_live_py      = file("${path.module}/wxsat_live.py")
     wxsat_notify_py    = file("${path.module}/wxsat_notify.py")
+    wxsat_sync_py       = file("${path.module}/wxsat_sync.py")
+    wxsat_live_relay_py = file("${path.module}/wxsat_live_relay.py")
   })
 }
 

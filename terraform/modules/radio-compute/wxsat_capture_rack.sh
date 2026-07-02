@@ -77,7 +77,9 @@ trap cleanup EXIT INT TERM
 # recording, decode sync while decoding). Best-effort, read-only on the IQ —
 # never affects the capture; the trap kills it on any exit. Reads WXSAT_AOS/LOS/
 # SAT/NORAD from our env (set by the scheduler) for the satellite track.
-if [ -f /opt/wxsat/wxsat_live.py ]; then
+# Skipped in decode-only mode: the Pi's sidecar already produced the pass.json
+# replay snapshot during recording — launching here would clobber it.
+if [ -f /opt/wxsat/wxsat_live.py ] && [[ "${WXSAT_DECODE_ONLY:-0}" != "1" ]]; then
   python3 /opt/wxsat/wxsat_live.py &
   LIVE_PID=$!
 fi
@@ -98,15 +100,25 @@ while [[ "$(free_gb)" =~ ^[0-9]+$ && "$(free_gb)" -lt "$need_gb" ]]; do
   rm -f "$oldest"
 done
 
-echo "wxsat-rack: recording ${DUR}s from rtl_tcp ${WXSAT_RTLTCP_HOST:-goes.srvr}:${WXSAT_RTLTCP_PORT:-1234} -> $IQ"
-python3 /opt/wxsat/wxsat_record_rtltcp.py "$IQ" "$DUR"
-rc=$?
-if [[ ! -s "$IQ" ]]; then
-  echo "wxsat-rack: no IQ recorded (rc=$rc)" >&2
-  exit 12
-fi
-if [[ $rc -eq 12 ]]; then
-  echo "wxsat-rack: WARNING short recording (rc=12) — decoding what we got" >&2
+if [[ "${WXSAT_DECODE_ONLY:-0}" == "1" ]]; then
+  # Pi-local pipeline (2026-07-02): the baseband was recorded on goes.srvr and
+  # rsync-pulled here by wxsat-sync — skip straight to SatDump.
+  echo "wxsat-rack: decode-only mode (baseband pulled from the Pi)"
+  if [[ ! -s "$IQ" ]]; then
+    echo "wxsat-rack: no baseband present at $IQ" >&2
+    exit 12
+  fi
+else
+  echo "wxsat-rack: recording ${DUR}s from rtl_tcp ${WXSAT_RTLTCP_HOST:-goes.srvr}:${WXSAT_RTLTCP_PORT:-1234} -> $IQ"
+  python3 /opt/wxsat/wxsat_record_rtltcp.py "$IQ" "$DUR"
+  rc=$?
+  if [[ ! -s "$IQ" ]]; then
+    echo "wxsat-rack: no IQ recorded (rc=$rc)" >&2
+    exit 12
+  fi
+  if [[ $rc -eq 12 ]]; then
+    echo "wxsat-rack: WARNING short recording (rc=12) — decoding what we got" >&2
+  fi
 fi
 
 # A real image product (>10k PNG) anywhere under $OUT means a successful decode.
