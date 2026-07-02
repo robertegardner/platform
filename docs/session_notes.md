@@ -4,7 +4,46 @@ Working notes per session, newest first. Full detail lives in
 `deployment_notes.md` (results, runbooks) and git history; this is the quick
 "where were we" index.
 
-## 2026-06-30 (latest) — scanner UI cleanup + GOES gallery fixes
+## 2026-07-01 (latest) — Meteor LRPT revived on the GOES Pi
+
+**State: chain LIVE end-to-end; reception TBD (validation phase).** Branch
+`meteor-lrpt-goes-pi` (spec+plan in `docs/superpowers/`). A tuned Meteor antenna +
+externally powered LNA + the old Nooelec (serial 22012952) went onto the GOES Pi
+(goes.srvr). Plugging it in flaked the GOES capture → revived the DARK wxsat stack
+pointed at the GOES Pi instead of p24.
+
+- **Serial-pin GOES (fixes the flake).** `goes.service` ran `--source rtlsdr` with
+  NO device selector → with two identical RTL2838s it grabbed enum index 0 (a
+  coin-flip). New `/usr/local/sbin/goes-satdump.sh` resolves the SMArTee's index
+  from its serial (47360874) and appends `--source_id=<idx>`, hard-failing rather
+  than grab device 0. **GOTCHA: SatDump 2.0-alpha needs `--source_id=VALUE`
+  (equals); space-separated broke the parser ("Could not find a handler for source
+  type : rtlsdr") and took GOES down until reverted.** Verified: GOES pins to index
+  1 with the Nooelec at index 0, SYNCED.
+- **USB over-current (the real blocker).** Serving the Nooelec instantly killed
+  GOES (`cb transfer status: 1`). NOT bandwidth (both streams tiny) — the Pi 5's
+  default **600 mA total-USB cap** tripped over-current with two dongles. Fix:
+  `usb_max_current_enable=1` (1.6 A) in config.txt + reboot. The Pi runs on a **PoE
+  HAT** (no USB-C PD), so this asserts the HAT's headroom — verified `throttled=0x0`
+  with both streaming, 70 s soak clean, 0 over-current. Baked into the pi-wxsat
+  provisioner (write-if-absent, reboot to apply).
+- **Repoint + un-gate.** `pi-wxsat` now targets goes.srvr (`wxsat_host` default →
+  .134); registry `nooelec-wx` un-shelved (host goes.srvr). Rack scheduler on .84
+  un-gated live: `DRY_RUN=0`, both M2-3/M2-4, `MIN_ELEV_DEG=8`, host .134, ntfy →
+  `ntfy.sh/meteor-cape`. `wxsat.env` is keep-if-absent → edited live (registry host
+  does NOT rewrite it). New `wxsat_notify.py` (ntfy pass/decode, best-effort).
+- **New: dashboard Meteor tile** (`home.rg2.io`, ☄️) — next-pass + last-decode via
+  `/api/wxsat/*`, `/api/proxy/meteor-latest.png`.
+- **Verified:** chain records IQ from the Nooelec rtl_tcp → SatDump; scheduler
+  predicts 18 passes; APIs + ntfy work; GOES survived a REAL scheduled pass capture
+  with 0 transfer errors. **OPEN: reception** — a forced capture + a low 22° pass
+  both read weak (in-band/edge only ~1.5 dB, energy in a +90.8 kHz spur, NOSYNC),
+  matching the Nooelec's p24 NOSYNC history. Judge on a 30°+ pass before concluding;
+  live waterfall (`/api/wxsat/live` waterfall/level) not populating — sidecar bug to
+  chase. Note: parallel `comics-display` branch diverges on `dashboard.py` (both add
+  a tile) — reconcile at merge.
+
+## 2026-06-30 — scanner UI cleanup + GOES gallery fixes
 
 **State: all LIVE + merged to main.** Two threads on top of the dashboard work.
 
