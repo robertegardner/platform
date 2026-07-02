@@ -783,9 +783,12 @@ WXSAT_MIN_FREE_GB=2
 AOS_BUFFER_S=45
 POST_LOS_S=15
 REFRESH_INTERVAL_S=1800
-# ntfy pass/decode alerts (best-effort; empty = disabled). Set both to enable.
-NTFY_URL=
-NTFY_TOPIC=
+# ntfy pass/decode alerts (best-effort; empty = disabled). The SELF-HOSTED
+# instance (ntfy.bobgardner.org, shared with homelab-monitor) — never ntfy.sh:
+# its anonymous per-IP daily quota is consumed by the self-host's own iOS
+# upstream forwarding, so direct ntfy.sh pushes 429 (found 2026-07-02).
+NTFY_URL=https://ntfy.bobgardner.org
+NTFY_TOPIC=meteor-cape
 # Pi-local pipeline (2026-07-02): where wxsat-sync pulls captures from and the
 # live relay's source.
 WXSAT_PI_HOST=${wxsat_rtltcp_host}

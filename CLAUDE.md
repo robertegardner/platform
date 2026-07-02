@@ -306,9 +306,19 @@ survey. **Meteor LRPT was REVIVED 2026-07-01 on the GOES Pi** (branch
 `goes.service` serial-pinned to the SMArTee (47360874, `--source_id=<idx>` EQUALS
 syntax), Pi 5 USB cap raised (`usb_max_current_enable=1` — two dongles tripped the
 600mA over-current) so both stream on the PoE HAT; rack scheduler (.84) un-gated off
-`goes.srvr:1234` rtl_tcp, ntfy → meteor-cape, ☄️ tile on home.rg2.io. Chain LIVE
-end-to-end; **reception still weak/NOSYNC on low passes** (judge on a 30°+ pass) —
-see [[wxsat-meteor-on-p24]]. (NOAA-sat/RTL v4 path stays DARK.)
+`goes.srvr:1234` rtl_tcp, ntfy → meteor-cape, ☄️ tile on home.rg2.io.
+**2026-07-02: FIRST METEOR IMAGE** — after the user reoriented/relocated the
+V-dipole (fiberglass diving board over the pool) + re-added the Sawbird (powered
+by the XTR's always-on bias tee), the 78° M2-3 pass decoded full MSU-MR imagery
+through the Pi-local pipeline; chain also proven via ORBCOMM Doppler tracks.
+E4000 gain MUST stay AGC (`WXSAT_GAIN_TENTHS=` empty — any manual gain rails the
+ADC behind the Sawbird). M2-3's transmit antenna is weak (defective) — low M2-3
+passes will fail; M2-4 is the reliable target. **ntfy = the SELF-HOSTED
+`ntfy.bobgardner.org` for the ENTIRE stack (shared with homelab-monitor), NEVER
+ntfy.sh** — the self-host's iOS upstream forwarding consumes ntfy.sh's per-IP
+anonymous daily quota, so direct ntfy.sh pushes 429 (every push 07-01→07-02 was
+silently lost this way, incl. the first image; wxsat_notify.py now retries
+429/5xx). See [[wxsat-meteor-on-p24]]. (NOAA-sat/RTL v4 path stays DARK.)
 
 ## NPM proxy map (user-managed; TARGET state for the Android app — see
 ## deployment_notes "Android app integration")
