@@ -46,19 +46,24 @@ echo "      $(cat /root/.ssh/id_goes.pub)"
 echo "    ===================================================================="
 
 # --- 3) rsync-pull service + timer ------------------------------------------
-# Pull IMAGES + EMWIN (skip the bulky L2 and Admin Messages). CRITICAL: NO
-# --delete — goes.srvr prunes itself to ~24h, so a mirror-delete would wipe the
+# Pull IMAGES + EMWIN + L2 (skip Admin Messages + our own derived/). CRITICAL:
+# NO --delete — goes.srvr prunes itself, so a mirror-delete would wipe the
 # long-term archive on every pull. Products ACCUMULATE here; the prune timer
-# (step 4) caps growth at the retention window. Pull interval (${pull_interval}s)
-# << the Pi's 24h retention, so nothing is missed.
+# (step 4) caps growth at the retention window. On success we touch
+# .last-pull-ok on the Pi: goes-prune there keys its FAST (synced) retention
+# off that stamp, so anything older than the stamp is confirmed archived. No
+# stamp reaching the Pi = its prune stays on the long fallback window.
 cat > /usr/local/sbin/goes-pull.sh <<EOF
 #!/usr/bin/env bash
-# platform-managed (goes-archive): incremental, non-destructive pull.
+# platform-managed (goes-archive): incremental, non-destructive pull; on
+# success stamp .last-pull-ok on the Pi (its goes-prune fast retention gate).
 set -uo pipefail
-exec rsync -az --timeout=120 \
-  --exclude='Admin Messages/' --exclude='derived/' \
-  -e "ssh -i /root/.ssh/id_goes -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15" \
-  "${goes_ssh_user}@${goes_host}:${goes_output_dir}/" "$ARCHIVE/"
+SSH="ssh -i /root/.ssh/id_goes -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+rsync -az --timeout=120 \
+  --exclude='Admin Messages/' --exclude='derived/' --exclude='.last-pull-ok' \
+  -e "\$SSH" \
+  "${goes_ssh_user}@${goes_host}:${goes_output_dir}/" "$ARCHIVE/" || exit \$?
+exec \$SSH "${goes_ssh_user}@${goes_host}" "touch '${goes_output_dir}/.last-pull-ok'"
 EOF
 chmod +x /usr/local/sbin/goes-pull.sh
 

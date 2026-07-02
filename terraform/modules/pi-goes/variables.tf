@@ -25,9 +25,15 @@ variable "devices" {
 }
 
 variable "prune_retention_hours" {
-  description = "Keep only this many hours of goes_output on the Pi's small SD card (the rack pulls every minute, so 24h is a huge safety margin)"
+  description = "FALLBACK retention: keep this many hours of goes_output when the rack's pull confirmation (.last-pull-ok stamp) is missing or stale — a rack outage must never lose unarchived products"
   type        = number
   default     = 24
+}
+
+variable "prune_synced_retention_hours" {
+  description = "Fast retention for products a goes-pull stamp confirms the rack has already rsync'd (the 29G SD also hosts wxsat captures at ~478MB/pass — keep this short)"
+  type        = number
+  default     = 3
 }
 
 variable "goes_output_dir" {

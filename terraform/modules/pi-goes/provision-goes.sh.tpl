@@ -130,21 +130,38 @@ systemctl restart goes.service || echo "    WARN: goes.service did not start (SD
 echo "    goes.service: $(systemctl is-active goes.service 2>/dev/null)"
 
 # --- 4) Local prune timer ---------------------------------------------------
-# The SD card is small (~11 GB free) and goes_output grows ~7 GB/day. Keep only
-# the last PRUNE_HOURS so the card never fills. INVARIANT: the rack pulls every
-# ~60s (goes-pull.timer on the LXC) << this retention, so nothing is lost.
+# The SD card is small AND shared with wxsat captures (~478MB/pass), so synced
+# products age out FAST: goes-pull (the rack LXC, every ~60s) touches
+# .last-pull-ok after each successful rsync, and anything that existed before
+# that confirmed pull is prunable after PRUNE_SYNCED_HOURS. No stamp / stale
+# stamp = fall back to PRUNE_HOURS so a rack outage can't lose unarchived
+# products — capped there because keeping the Pi's own decode alive (disk
+# space) beats archive completeness past that point.
 cat > /usr/local/sbin/goes-prune.sh <<EOF
 #!/usr/bin/env bash
-# platform-managed (pi-goes): drop goes_output older than the retention window.
+# platform-managed (pi-goes): drop goes_output the rack has confirmed pulling.
 set -uo pipefail
 OUT="${output_dir}"
-MIN=\$(( ${prune_hours} * 60 ))
+STAMP="\$OUT/.last-pull-ok"
+SYNCED_MIN=\$(( ${prune_synced_hours} * 60 ))
+FALLBACK_MIN=\$(( ${prune_hours} * 60 ))
+CUTOFF=\$FALLBACK_MIN
+if [ -f "\$STAMP" ]; then
+  # Prune only what already existed at the last confirmed pull (15 min margin
+  # covers a file landing mid-rsync-scan), never younger than the synced window.
+  stamp_age_min=\$(( ( \$(date +%s) - \$(stat -c %Y "\$STAMP") ) / 60 ))
+  CUTOFF=\$(( stamp_age_min + 15 ))
+  [ "\$CUTOFF" -lt "\$SYNCED_MIN" ] && CUTOFF=\$SYNCED_MIN
+  [ "\$CUTOFF" -gt "\$FALLBACK_MIN" ] && CUTOFF=\$FALLBACK_MIN
+fi
 # Timestamped capture dirs: IMAGES/<sat>/<sector>/<YYYY-MM-DD_HH-MM-SS>/
-[ -d "\$OUT/IMAGES" ] && find "\$OUT/IMAGES" -mindepth 3 -maxdepth 3 -type d -mmin +\$MIN -exec rm -rf {} + 2>/dev/null
-# EMWIN / L2 / Admin files age out by mtime.
-for sub in EMWIN L2 "Admin Messages"; do
-  [ -d "\$OUT/\$sub" ] && find "\$OUT/\$sub" -type f -mmin +\$MIN -delete 2>/dev/null
+[ -d "\$OUT/IMAGES" ] && find "\$OUT/IMAGES" -mindepth 3 -maxdepth 3 -type d -mmin +\$CUTOFF -exec rm -rf {} + 2>/dev/null
+# EMWIN / L2 are rack-pulled too — same confirmed-sync window.
+for sub in EMWIN L2; do
+  [ -d "\$OUT/\$sub" ] && find "\$OUT/\$sub" -type f -mmin +\$CUTOFF -delete 2>/dev/null
 done
+# Admin Messages are excluded from the rack pull (never archived) — long window.
+[ -d "\$OUT/Admin Messages" ] && find "\$OUT/Admin Messages" -type f -mmin +\$FALLBACK_MIN -delete 2>/dev/null
 exit 0
 EOF
 chmod +x /usr/local/sbin/goes-prune.sh
@@ -171,7 +188,7 @@ EOF
 systemctl daemon-reload
 systemctl enable goes-prune.timer >/dev/null 2>&1 || true
 systemctl restart goes-prune.timer || true
-echo "    goes-prune.timer: $(systemctl is-active goes-prune.timer 2>/dev/null) (retention $${PRUNE_HOURS}h)"
+echo "    goes-prune.timer: $(systemctl is-active goes-prune.timer 2>/dev/null) (synced ${prune_synced_hours}h / fallback ${prune_hours}h)"
 
 # --- 5) Dish-aiming tool (goes-aim) -----------------------------------------
 # Serves the look angles (az/el to the GOES bird from the station) + a live
