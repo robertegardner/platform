@@ -41,7 +41,7 @@ esphome:
       - wait_until:
           condition:
             wifi.connected:
-      - online_image.update: comic_img
+      - component.update: comic_img
 
 esp32:
   board: seeed_xiao_esp32s3
