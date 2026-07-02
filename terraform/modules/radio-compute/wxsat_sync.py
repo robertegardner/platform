@@ -55,11 +55,23 @@ def list_remote_complete():
 
 def pull(name):
     dest = WXSAT_DIR / name
-    r = subprocess.run(
-        ["rsync", "-az", "--timeout=120",
-         "-e", "ssh " + " ".join(SSH_OPTS),
-         f"{PI_USER}@{PI_HOST}:{PI_CAPTURES}/{name}/", f"{dest}/"],
-        capture_output=True, text=True, timeout=1800)
+    # --append-verify (implies --inplace): a degraded UDB link can move a
+    # ~450 MB baseband slower than any sane timeout, and the timeout kill is a
+    # SIGKILL rsync can't clean up from — writing in place means every attempt
+    # keeps its bytes and the next tick verifies + appends instead of starting
+    # over. Safe because capture dirs are immutable once marker-complete. No
+    # -z: CU8 IQ is noise (incompressible), compression just burns Pi CPU next
+    # to the GOES decode.
+    try:
+        r = subprocess.run(
+            ["rsync", "-a", "--append-verify", "--timeout=120",
+             "-e", "ssh " + " ".join(SSH_OPTS),
+             f"{PI_USER}@{PI_HOST}:{PI_CAPTURES}/{name}/", f"{dest}/"],
+            capture_output=True, text=True, timeout=1800)
+    except subprocess.TimeoutExpired:
+        log.warning("rsync %s timed out (slow link?) — progress kept in place, "
+                    "retrying next tick", name)
+        return None
     if r.returncode != 0:
         log.warning("rsync %s failed: %s", name, r.stderr.strip()[:200])
         return None
