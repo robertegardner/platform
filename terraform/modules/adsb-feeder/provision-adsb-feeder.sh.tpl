@@ -26,6 +26,19 @@ else
   systemctl start docker || true
 fi
 
+# nftables.service must stay DISABLED on this Docker host (2026-07-02): a
+# package-upgrade restart of it runs the stock /etc/nftables.conf whose
+# `flush ruleset` wipes Docker's NAT chains — every container silently loses
+# egress AND LAN while staying "healthy" (killed FA/ADSBx/MLAT for ~5 h). The
+# stock config is an empty accept-all skeleton, so nothing is lost. NEVER
+# `systemctl stop`/`disable --now` it while active — its ExecStop ALSO runs
+# `nft flush ruleset`. (If it ever bites anyway: `systemctl restart docker`
+# rebuilds the rules.)
+if [ "$(systemctl is-enabled nftables 2>/dev/null)" = "enabled" ]; then
+  systemctl disable nftables >/dev/null 2>&1 || true
+  echo "    nftables.service disabled (docker-NAT flush guard)"
+fi
+
 # --- 2) Layout --------------------------------------------------------------
 install -d -m 0755 /opt/adsb-feeder /opt/adsb-feeder/globe_history /opt/adsb-feeder/collectd /etc/adsb-feeder
 
