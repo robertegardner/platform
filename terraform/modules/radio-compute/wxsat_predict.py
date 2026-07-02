@@ -40,11 +40,14 @@ PASSES_PATH = Path(os.environ.get("WXSAT_PASSES_PATH",
 # default but can be enabled from wxsat.env.
 # ---------------------------------------------------------------------------
 CATALOG = [
-    # lrpt_pipeline is per-satellite: M2-4 downlinks 80k symbols, M2-3 72k.
-    # The capture script still auto-falls-back to the other rate, so a wrong
-    # entry costs one decode timeout, not the pass.
+    # lrpt_pipeline is per-satellite so the likely symbol rate decodes FIRST
+    # (the capture script still auto-falls-back to the other rate, so a wrong
+    # entry costs one decode timeout, not the pass). Both birds transmit
+    # 137.9 MHz @ 72k as of 2026-07 — check usradioguy.com/meteor-satellite/
+    # when a pass that DID show a signal hump decodes empty (rates change on
+    # uplink command with little notice; M2-4 flew 80k during 2024).
     {"name": "METEOR-M2 4", "norad": 59051, "flag": "M2_4_ENABLED", "default": "1",
-     "lrpt_pipeline": "meteor_m2-x_lrpt_80k"},
+     "lrpt_pipeline": "meteor_m2-x_lrpt"},
     {"name": "METEOR-M2 3", "norad": 57166, "flag": "M2_3_ENABLED", "default": "0",
      "lrpt_pipeline": "meteor_m2-x_lrpt"},
 ]
