@@ -29,7 +29,12 @@ if not PI_BASE:
 LIVE_DST = os.environ.get("WXSAT_LIVE_PATH", "/run/sdr-streams/wxsat_live.json")
 STATUS_DST = os.environ.get("WXSAT_STATUS_PATH",
                             "/run/sdr-streams/wxsat_status.json")
+DECODING_SRC = os.environ.get("WXSAT_DECODING_PATH",
+                              "/run/sdr-streams/wxsat_decoding.json")
 POLL_S = float(os.environ.get("WXSAT_RELAY_POLL_S", "1.5"))
+# A decode is bounded by wxsat-sync's 2100 s backstop; past that the marker is
+# a leftover from a crashed sync and must not pin "decoding" forever.
+DECODING_MAX_AGE_S = 2400
 
 
 def fetch(name):
@@ -52,14 +57,35 @@ while True:
             write(LIVE_DST, live)
     except Exception:
         pass  # link down / no capture running — nothing to relay
-    try:
-        # Status changes rarely (scheduled/capturing transitions) — mirror it
-        # every ~10 s, not every poll.
-        if time.time() - last_status_written >= 10:
+    # Status changes rarely (scheduled/capturing transitions) — refresh it
+    # every ~10 s, not every poll.
+    if time.time() - last_status_written >= 10:
+        status = None
+        try:
             status = fetch("wxsat_status.json")
-            if isinstance(status, dict) and status.get("state"):
+        except Exception:
+            pass  # Pi unreachable — wxsat-sync's fallback status takes over
+        # A local rack decode outranks the Pi's post-LOS "scheduled": report it
+        # as capturing (the tuner's stream-up heuristic renders that as
+        # "decoding" — the same trick the Pi-era pipeline used).
+        decoding = None
+        try:
+            with open(DECODING_SRC) as f:
+                d = json.load(f)
+            if time.time() - d.get("updated", 0) <= DECODING_MAX_AGE_S:
+                decoding = d
+        except Exception:
+            pass
+        try:
+            if decoding:
+                write(STATUS_DST, {"state": "capturing", "phase": "decoding",
+                                   "updated": int(time.time()), "dry_run": False,
+                                   "next_pass": (status or {}).get("next_pass"),
+                                   "capturing_pass": decoding.get("pass")})
+                last_status_written = time.time()
+            elif isinstance(status, dict) and status.get("state"):
                 write(STATUS_DST, status)
                 last_status_written = time.time()
-    except Exception:
-        pass  # Pi unreachable — wxsat-sync's fallback status takes over
+        except Exception:
+            pass
     time.sleep(POLL_S)

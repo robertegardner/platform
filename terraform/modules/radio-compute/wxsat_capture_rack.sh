@@ -77,10 +77,16 @@ trap cleanup EXIT INT TERM
 # recording, decode sync while decoding). Best-effort, read-only on the IQ —
 # never affects the capture; the trap kills it on any exit. Reads WXSAT_AOS/LOS/
 # SAT/NORAD from our env (set by the scheduler) for the satellite track.
-# Skipped in decode-only mode: the Pi's sidecar already produced the pass.json
-# replay snapshot during recording — launching here would clobber it.
-if [ -f /opt/wxsat/wxsat_live.py ] && [[ "${WXSAT_DECODE_ONLY:-0}" != "1" ]]; then
-  python3 /opt/wxsat/wxsat_live.py &
+# In decode-only mode the sidecar still runs (it publishes the decode-phase
+# sync state to /api/wxsat/live) but with snapshots suppressed — the Pi's
+# sidecar already saved the pass.json replay snapshot during recording and
+# overwriting it here would lose the real waterfall.
+if [ -f /opt/wxsat/wxsat_live.py ]; then
+  if [[ "${WXSAT_DECODE_ONLY:-0}" == "1" ]]; then
+    WXSAT_NO_SNAPSHOT=1 python3 /opt/wxsat/wxsat_live.py &
+  else
+    python3 /opt/wxsat/wxsat_live.py &
+  fi
   LIVE_PID=$!
 fi
 

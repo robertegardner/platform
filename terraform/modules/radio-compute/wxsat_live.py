@@ -208,6 +208,12 @@ def main():
     half_khz = min(250.0, fs / 2000.0)
 
     def save_snapshot():
+        # Rack decode-only runs suppress the snapshot: the Pi's sidecar already
+        # saved pass.json with the real recording-phase waterfall — overwriting
+        # it here would replace that with an empty one.
+        if os.environ.get("WXSAT_NO_SNAPSHOT", "") not in ("", "0"):
+            return
+
         def thin(seq, m=240):
             if len(seq) <= m:
                 return seq

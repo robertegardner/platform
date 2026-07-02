@@ -310,7 +310,11 @@ def poll_meteor():
     tile["state"] = "ok" if state_word in ("capturing", "decoding", "scheduled", "idle") else "warn"
     cap = status.get("capturing_pass") or {}
     nxt = status.get("next_pass") or (plist[0] if plist else {})
-    if cap:
+    # The tuner distinguishes recording from the post-LOS rack decode (its
+    # "tuner" field flips capturing -> decoding); label them honestly.
+    if cap and status.get("tuner") == "decoding":
+        tile["headline"] = f"Decoding {cap.get('satellite', 'METEOR-M2')}"
+    elif cap:
         tile["headline"] = f"Capturing {cap.get('satellite', 'METEOR-M2')}"
     elif nxt:
         mins = tile["upcoming"][0]["in_min"] if tile["upcoming"] else None

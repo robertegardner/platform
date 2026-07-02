@@ -32,6 +32,10 @@ SSH_OPTS = ["-i", SSH_KEY, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
             "-o", "StrictHostKeyChecking=accept-new"]
 WXSAT_DIR = predict.WXSAT_DIR
 CAPTURE_SCRIPT = "/opt/wxsat/wxsat_capture_rack.sh"
+# While a decode runs, this marker tells the live relay to report a
+# "decoding" status (the Pi's own status went back to "scheduled" at LOS).
+DECODING_PATH = Path(os.environ.get("WXSAT_DECODING_PATH",
+                                    "/run/sdr-streams/wxsat_decoding.json"))
 
 
 def _ssh(cmd, timeout=30):
@@ -80,7 +84,12 @@ def decode(d, meta):
                WXSAT_OUT_DIR=str(d),
                WXSAT_DURATION=str(meta.get("duration_s", 900)),
                WXSAT_SAMPLERATE=str(meta.get("samplerate", 250000)),
-               LRPT_PIPELINE=meta.get("lrpt_pipeline", "meteor_m2-x_lrpt"))
+               LRPT_PIPELINE=meta.get("lrpt_pipeline") or "meteor_m2-x_lrpt",
+               # Pass context for the decode-phase live sidecar.
+               WXSAT_AOS=str(int(meta.get("aos_unix") or 0)),
+               WXSAT_LOS=str(int(meta.get("los_unix") or 0)),
+               WXSAT_SAT=str(meta.get("satellite") or ""),
+               WXSAT_NORAD=str(meta.get("norad") or ""))
     # start_new_session + killpg backstop: same orphan-proofing as the old
     # scheduler (SatDump grinds forever on a no-lock baseband, db4b2e1).
     proc = subprocess.Popen([CAPTURE_SCRIPT], env=env, stdout=subprocess.PIPE,
@@ -99,13 +108,34 @@ def decode(d, meta):
         return 124, "", "decode backstop timeout"
 
 
+def _mark_decoding(meta, outdir):
+    try:
+        tmp = DECODING_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"updated": int(time.time()), "pass": meta,
+                                   "outdir": outdir}))
+        os.replace(tmp, DECODING_PATH)
+    except OSError:
+        pass
+
+
+def _clear_decoding():
+    try:
+        DECODING_PATH.unlink()
+    except OSError:
+        pass
+
+
 def process(d):
     meta = load_meta(d)
     if (d / "capture.failed").exists():
         reason = (d / "capture.failed").read_text().strip()[:180]
         sched.record_outcome(meta, "failed", reason=f"Pi capture: {reason}", outdir=d.name)
     else:
-        rc, out, err = decode(d, meta)
+        _mark_decoding(meta, d.name)
+        try:
+            rc, out, err = decode(d, meta)
+        finally:
+            _clear_decoding()
         image, thumb = sched._best_product(d)
         if image:
             sched.record_outcome(meta, "image", image=image, thumb=thumb or image,
