@@ -34,10 +34,11 @@ import threading
 import time
 import urllib.request
 from datetime import datetime, timezone
+from html import unescape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, urljoin
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 try:
     from zoneinfo import ZoneInfo
@@ -171,7 +172,8 @@ def _all_imgs(html, base):
 
 
 # ---- Source fetchers ------------------------------------------------------
-# Each returns (image_bytes, source_url). Raises on failure. Best-effort: the
+# Each returns (image_bytes, source_url) or (image_bytes, source_url, caption)
+# when the joke text is separate HTML. Raises on failure. Best-effort: the
 # scraped hosts have no API contract, so parsing is defensive with og:image as
 # the near-universal fallback.
 def _fetch_xkcd(src):
@@ -209,21 +211,36 @@ def _fetch_gocomics(src):
 
 
 def _fetch_farside(src):
-    # thefarside.com rotates a "Daily Dose" of cartoons on the homepage. The real
-    # strips are hosted at siteassets.thefarside.com/uploads/post_preview_images/...
-    # (verified 2026-07-01). The old /cartoon//assets//tfs match no longer appears,
-    # so it fell back to og:image — a branding logo card, NOT a strip. Match the
-    # real path directly (regex over the raw HTML, robust to lazy-load/data-src),
-    # pick randomly so repeated pulls vary within the day.
+    # thefarside.com's homepage "Daily Dose" cards ARE in the raw HTML, but the
+    # cartoons are lazy-loaded: <img data-src="https://featureassets.amuniversal
+    # .com/assets/<hex>"> inside the js-daily-dose section, with the caption as a
+    # sibling <figcaption> (the caption is the joke — it is NOT in the image).
+    # The earlier /uploads/post_preview_images/ match was WRONG: those are the
+    # two static Comic Collections promo tiles at the bottom of the page —
+    # cropped caption-less teasers that basically never change (the "partial,
+    # stale comic" bug, root-caused 2026-07-02). Pick a random card per fetch so
+    # pulls vary within the day; keep the preview tiles as a last-ditch fallback.
     html = _http_get("https://www.thefarside.com/").decode("utf-8", "replace")
+    dose = html[html.find("js-daily-dose"):]
+    cards = []
+    for chunk in dose.split('js-comic"')[1:]:
+        img = re.search(
+            r'data-src="(https://featureassets\.amuniversal\.com/assets/[^"]+)"',
+            chunk)
+        if not img:
+            continue
+        cap = re.search(
+            r'<figcaption[^>]*>\s*(.*?)\s*</figcaption>', chunk, re.S)
+        caption = unescape(re.sub(r"\s+", " ", cap.group(1))) if cap else None
+        cards.append((img.group(1), caption))
+    if cards:
+        url, caption = random.choice(cards)
+        return _http_get(url), url, caption
     imgs = list(set(re.findall(
         r'https?://[^\s"\'<>)]+?/uploads/post_preview_images/[^\s"\'<>)]+', html)))
     if imgs:
         url = random.choice(imgs)
         return _http_get(url), url
-    og = _meta_re(html, "og:image")
-    if og:
-        return _http_get(og), og
     raise RuntimeError("no far side cartoon found on homepage")
 
 
@@ -272,12 +289,39 @@ def _mean_saturation(img):
     return sum(px) / len(px) if px else 0
 
 
-def render(raw_bytes, palette_mode="auto"):
+def _caption_font(size):
+    try:
+        return ImageFont.load_default(size=size)  # scalable, Pillow >= 10.1
+    except TypeError:  # pragma: no cover — old Pillow, tiny bitmap font
+        return ImageFont.load_default()
+
+
+def _wrap_caption(draw, text, font, max_w, max_lines=4):
+    """Greedy word-wrap to max_w px; ellipsize past max_lines."""
+    lines, line = [], ""
+    for word in text.split():
+        cand = (line + " " + word).strip()
+        if draw.textlength(cand, font=font) <= max_w or not line:
+            line = cand
+        else:
+            lines.append(line)
+            line = word
+    if line:
+        lines.append(line)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        lines[-1] = lines[-1][:max(0, len(lines[-1]) - 2)] + "…"
+    return lines
+
+
+def render(raw_bytes, palette_mode="auto", caption=None):
     """Raw image bytes -> 800x480 PNG + BMP dithered to the panel palette.
 
     palette_mode: 'color' (full 6), 'mono' (black/white — best for line-art
     dailies like The Far Side, avoids JPEG-speckle colour), or 'auto' (mono when
-    the source is nearly greyscale, else colour).
+    the source is nearly greyscale, else colour). caption, if given, is drawn
+    black-on-white under the artwork (Far Side jokes live in the caption text —
+    the scraped image is art-only).
     """
     src = Image.open(io.BytesIO(raw_bytes))
     # Flatten transparency onto paper white.
@@ -296,9 +340,22 @@ def render(raw_bytes, palette_mode="auto"):
 
     # Fit within the panel, letterbox the rest on white.
     canvas = Image.new("RGB", (W, H), BG)
+    draw = ImageDraw.Draw(canvas)
+    strip_h = 0
+    lines, font, line_h = [], None, 0
+    if caption:
+        font = _caption_font(20)
+        lines = _wrap_caption(draw, caption, font, W - 32)
+        line_h = 26
+        strip_h = len(lines) * line_h + 10
     fitted = src.copy()
-    fitted.thumbnail((W, H), Image.LANCZOS)
-    canvas.paste(fitted, ((W - fitted.width) // 2, (H - fitted.height) // 2))
+    fitted.thumbnail((W, H - strip_h), Image.LANCZOS)
+    canvas.paste(fitted, ((W - fitted.width) // 2, (H - strip_h - fitted.height) // 2))
+    y = H - strip_h + 4
+    for ln in lines:
+        draw.text(((W - draw.textlength(ln, font=font)) // 2, y),
+                  ln, fill=(0, 0, 0), font=font)
+        y += line_h
 
     dithered = canvas.quantize(
         palette=_palette_image(palette), dither=Image.Dither.FLOYDSTEINBERG
@@ -361,8 +418,10 @@ def fetch_source(src, force=False):
                           "fetched_at": _now()}
         return False
     try:
-        raw, url = fetcher(src)
-        png, bmp, mode_used = render(raw, src.get("palette", "auto"))
+        res = fetcher(src)  # (bytes, url) or (bytes, url, caption)
+        raw, url = res[0], res[1]
+        caption = res[2] if len(res) > 2 else None
+        png, bmp, mode_used = render(raw, src.get("palette", "auto"), caption)
         ppath, bpath = _pool_paths(sid)
         _atomic_write(ppath, png, binary=True)
         _atomic_write(bpath, bmp, binary=True)
