@@ -212,6 +212,10 @@ WXSAT_RTLTCP_PORT=${port}
 WXSAT_SAMPLERATE=250000
 # E4000 SMArTee XTR: AGC (empty). See wxsat notes before setting manual gain.
 WXSAT_GAIN_TENTHS=
+# Tuner offset measured +1.21 ppm against the local NWR carrier (162.550,
+# 52 dB SNR, 2026-07-02) — the XTR TCXO is honest. Re-measure with the same
+# method if the dongle is ever swapped.
+WXSAT_PPM=1
 FREQ_MHZ=137.9
 MIN_ELEV_DEG=8
 PREDICT_HOURS=48
