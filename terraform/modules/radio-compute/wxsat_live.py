@@ -40,9 +40,16 @@ POLL_S = 1.5
 
 
 def _iq_file(out_dir):
-    """The recorder writes baseband.cu8.part while recording, renames at the end."""
-    part = out_dir / "baseband.cu8.part"
-    return part if part.exists() else out_dir / "baseband.cu8"
+    """The recorder writes <name>.part while recording, renames at the end.
+    Rack streaming records baseband.cu8; the Pi capture script records
+    per-recovery-attempt files (bb.N.cu8) and promotes the largest at LOS —
+    follow whichever is newest so the spectrum tracks the growing file."""
+    candidates = [p for pat in ("baseband.cu8.part", "baseband.cu8",
+                                "bb.*.cu8.part", "bb.*.cu8")
+                  for p in out_dir.glob(pat)]
+    if not candidates:
+        return out_dir / "baseband.cu8"
+    return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
 def _atomic_write(payload):

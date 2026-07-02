@@ -123,18 +123,25 @@ def main():
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     logging.getLogger("pyorbital").setLevel(logging.WARNING)
     cfg = predict.load_config()
-    # Gallery forecast + status (the old streaming scheduler used to own these).
+    # Gallery forecast (the old streaming scheduler used to own this).
+    passes = []
     try:
         passes = predict.compute_passes(cfg)
         predict.write_passes(passes, cfg)
-        upcoming = [p for p in passes if p["aos_unix"] > time.time()]
-        sched.write_status(cfg, "scheduled" if upcoming else "idle",
-                           next_pass=min(upcoming, key=lambda p: p["aos_unix"])
-                           if upcoming else None)
     except Exception as e:
         log.warning("prediction failed: %s", e)
     names = list_remote_complete()
     if names is None:
+        # Pi unreachable: the live relay can't mirror the Pi's authoritative
+        # status, so fall back to our own forecast (never leaves a stale
+        # "capturing" on the gallery through an outage).
+        try:
+            upcoming = [p for p in passes if p["aos_unix"] > time.time()]
+            sched.write_status(cfg, "scheduled" if upcoming else "idle",
+                               next_pass=min(upcoming, key=lambda p: p["aos_unix"])
+                               if upcoming else None)
+        except Exception as e:
+            log.warning("fallback status failed: %s", e)
         return
     todo = [n for n in names if not (WXSAT_DIR / n / "decode.done").exists()]
     if not todo:
