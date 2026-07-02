@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # pi-wxsat provisioner — goes.srvr (the dedicated GOES decode Pi), bare metal.
 #
-# Brings up the Nooelec RTL2838 (tuned Meteor antenna + powered LNA) as an
-# rtl_tcp source for the rack's SatDump decoder. The Pi's job here is THIN: serve
-# the dedicated Nooelec on the LAN; all decode + storage happen on radio-compute
-# (.84).
+# Brings up the Meteor dongle (tuned Meteor antenna + powered LNA) as a
+# localhost rtl_tcp source AND the Pi-LOCAL capture stack (section 5): this Pi
+# sits on the Garage UDB wireless bridge, so capture must not depend on the
+# network — wxsat-scheduler records locally into /var/lib/wxsat/captures and
+# the rack's wxsat-sync (.84) pulls completed dirs to decode/index/notify.
 #
 # HARD RULE: never disturb the GOES downlink. goes.service is serial-pinned to
 # the SMArTee (47360874); we select the Nooelec (serial 22012952) STRICTLY by its
@@ -108,8 +109,8 @@ if [ -f /etc/wxsat/rtltcp.env ]; then
   echo "    /etc/wxsat/rtltcp.env exists - keeping it"
 else
   cat > /etc/wxsat/rtltcp.env <<EOF
-# pi-wxsat rtl_tcp source (Nooelec Meteor V-dipole). Tuning (freq/rate/gain) is
-# driven by the CLIENT over the rtl_tcp protocol — the rack's SatDump sets
+# pi-wxsat rtl_tcp source (Meteor dongle). Tuning (freq/rate/gain) is driven by
+# the CLIENT over the rtl_tcp protocol — the Pi-local capture client sets
 # 137.9 MHz + sample rate per pass. WXSAT_GAIN here is the default tuner gain
 # (tenths of dB; empty = auto/AGC). Selection is by serial, never index.
 WXSAT_SERIAL=${serial}
@@ -159,4 +160,137 @@ systemctl enable wxsat-rtltcp.service >/dev/null 2>&1 || true
 # Restart (not enable --now) so a config rewrite reloads. A missing/unenumerated
 # Nooelec just leaves the unit retrying — it never touches an ADS-B dongle.
 systemctl restart wxsat-rtltcp.service || true
-echo "==> pi-wxsat done. wxsat-rtltcp: $(systemctl is-active wxsat-rtltcp.service 2>/dev/null)"
+echo "    wxsat-rtltcp: $(systemctl is-active wxsat-rtltcp.service 2>/dev/null)"
+
+# --- 5) Pi-LOCAL capture stack (2026-07-02) ----------------------------------
+# Capture became Pi-local so a Garage-UDB link flap can't kill a pass: this
+# scheduler records from the localhost rtl_tcp into /var/lib/wxsat/captures and
+# the rack's wxsat-sync pulls + decodes. Code is provisioner-owned; wxsat.env
+# is keep-if-absent (operator-tunable).
+if ! python3 -c 'import pyorbital' >/dev/null 2>&1; then
+  command -v pip3 >/dev/null 2>&1 || apt-get install -y python3-pip >/dev/null 2>&1 || true
+  echo "    installing pyorbital (pip)"
+  pip3 install --break-system-packages pyorbital >/dev/null 2>&1 || \
+    echo "    WARN: pyorbital install failed — Pi scheduler will not predict"
+fi
+python3 -c 'import numpy' >/dev/null 2>&1 || apt-get install -y python3-numpy >/dev/null 2>&1 || true
+python3 -c 'import requests' >/dev/null 2>&1 || apt-get install -y python3-requests >/dev/null 2>&1 || true
+command -v usbreset >/dev/null 2>&1 || echo "    WARN: usbreset missing (usbutils) — ladder step 2 degraded"
+
+install -d -m 0755 /opt/wxsat-pi /var/lib/wxsat/captures /var/lib/wxsat/tle /var/lib/wxsat/http /run/wxsat
+ln -sfn /run/wxsat /var/lib/wxsat/http/live
+ln -sfn /var/lib/wxsat/captures /var/lib/wxsat/http/captures
+# /run is tmpfs — recreate the runtime dir at boot, before the units start.
+echo "d /run/wxsat 0755 root root -" > /etc/tmpfiles.d/wxsat.conf
+
+cat > /opt/wxsat-pi/wxsat_predict.py <<'PYEOF'
+${wxsat_predict_py}
+PYEOF
+cat > /opt/wxsat-pi/wxsat_record_rtltcp.py <<'PYEOF'
+${wxsat_record_py}
+PYEOF
+cat > /opt/wxsat-pi/wxsat_live.py <<'PYEOF'
+${wxsat_live_py}
+PYEOF
+cat > /opt/wxsat-pi/wxsat_scheduler_pi.py <<'PYEOF'
+${wxsat_scheduler_py}
+PYEOF
+cat > /opt/wxsat-pi/wxsat_capture_pi.sh <<'EOF'
+${wxsat_capture_sh}
+EOF
+chmod +x /opt/wxsat-pi/wxsat_scheduler_pi.py /opt/wxsat-pi/wxsat_capture_pi.sh \
+         /opt/wxsat-pi/wxsat_record_rtltcp.py /opt/wxsat-pi/wxsat_live.py
+
+if [ -f /etc/wxsat/wxsat.env ]; then
+  echo "    /etc/wxsat/wxsat.env exists - keeping it"
+else
+  cat > /etc/wxsat/wxsat.env <<EOF
+# Pi-local Meteor capture (goes.srvr). systemd EnvironmentFile — '#' only at
+# line start. DRY_RUN=0: capture-always is the point of the Pi-local design.
+DRY_RUN=0
+WXSAT_RTLTCP_PORT=${port}
+WXSAT_SAMPLERATE=250000
+# E4000 SMArTee XTR: AGC (empty). See wxsat notes before setting manual gain.
+WXSAT_GAIN_TENTHS=
+FREQ_MHZ=137.9
+MIN_ELEV_DEG=8
+PREDICT_HOURS=48
+M2_4_ENABLED=1
+M2_3_ENABLED=1
+LAT=37.31
+LON=-89.55
+ALT_KM=0.1
+LRPT_PIPELINE=meteor_m2-x_lrpt
+WXSAT_MIN_FREE_GB=4
+AOS_BUFFER_S=45
+POST_LOS_S=15
+REFRESH_INTERVAL_S=1800
+WXSAT_DIR=/var/lib/wxsat
+WXSAT_PASSES_PATH=/run/wxsat/wxsat_passes.json
+WXSAT_STATUS_PATH=/run/wxsat/wxsat_status.json
+WXSAT_CAPTURES_DIR=/var/lib/wxsat/captures
+EOF
+  echo "    wrote /etc/wxsat/wxsat.env"
+fi
+
+cat > /etc/systemd/system/wxsat-scheduler.service <<'EOF'
+[Unit]
+Description=wxsat Pi-local Meteor capture scheduler (records localhost rtl_tcp)
+Documentation=https://github.com/robertegardner/platform
+After=wxsat-rtltcp.service time-sync.target
+Wants=wxsat-rtltcp.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/wxsat/wxsat.env
+ExecStart=/usr/bin/python3 /opt/wxsat-pi/wxsat_scheduler_pi.py
+Restart=always
+RestartSec=15
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/wxsat-http.service <<'EOF'
+[Unit]
+Description=wxsat capture/live HTTP (rack sync + live relay read this)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -m http.server 8078 --directory /var/lib/wxsat/http --bind 0.0.0.0
+Restart=always
+RestartSec=10
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/wxsat-prune.service <<'EOF'
+[Unit]
+Description=wxsat capture prune (72h — the rack pulls within minutes when the link is up)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/find /var/lib/wxsat/captures -mindepth 1 -maxdepth 1 -type d -mmin +4320 -exec rm -rf {} +
+EOF
+
+cat > /etc/systemd/system/wxsat-prune.timer <<'EOF'
+[Unit]
+Description=Daily wxsat capture prune
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable wxsat-scheduler.service wxsat-http.service wxsat-prune.timer >/dev/null 2>&1 || true
+systemctl restart wxsat-scheduler.service wxsat-http.service || true
+systemctl restart wxsat-prune.timer || true
+echo "==> pi-wxsat local-capture: scheduler=$(systemctl is-active wxsat-scheduler.service) http=$(systemctl is-active wxsat-http.service)"

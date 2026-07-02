@@ -14,6 +14,13 @@ locals {
     bind_addr = var.rtltcp_bind
     port      = try(local.dev.port, 1234)
     gain      = var.rtltcp_gain
+    # Pi-local capture stack (2026-07-02): shared modules come from
+    # radio-compute so there is ONE source of truth for predict/record/live.
+    wxsat_predict_py   = file("${path.module}/../radio-compute/wxsat_predict.py")
+    wxsat_record_py    = file("${path.module}/../radio-compute/wxsat_record_rtltcp.py")
+    wxsat_live_py      = file("${path.module}/../radio-compute/wxsat_live.py")
+    wxsat_scheduler_py = file("${path.module}/wxsat_scheduler_pi.py")
+    wxsat_capture_sh   = file("${path.module}/wxsat_capture_pi.sh")
   })
 }
 
