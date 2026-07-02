@@ -29,8 +29,9 @@ from pathlib import Path
 
 import numpy as np
 
-LIVE_PATH = Path("/run/sdr-streams/wxsat_live.json")
-TLE_DIR = Path("/var/lib/sdr-streams/wxsat/tle")
+LIVE_PATH = Path(os.environ.get("WXSAT_LIVE_PATH",
+                                "/run/sdr-streams/wxsat_live.json"))
+TLE_DIR = Path(os.environ.get("WXSAT_TLE_DIR", "/var/lib/sdr-streams/wxsat/tle"))
 
 FFT_RAW = 4096
 FFT_BINS = 256

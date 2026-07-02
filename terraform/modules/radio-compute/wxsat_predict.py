@@ -29,9 +29,10 @@ log = logging.getLogger("wxsat.predict")
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-WXSAT_DIR  = Path("/var/lib/sdr-streams/wxsat")
+WXSAT_DIR  = Path(os.environ.get("WXSAT_DIR", "/var/lib/sdr-streams/wxsat"))
 TLE_DIR    = WXSAT_DIR / "tle"
-PASSES_PATH = Path("/run/sdr-streams/wxsat_passes.json")
+PASSES_PATH = Path(os.environ.get("WXSAT_PASSES_PATH",
+                                  "/run/sdr-streams/wxsat_passes.json"))
 
 # ---------------------------------------------------------------------------
 # Satellite catalogue. Each entry can be toggled via an env flag. Meteor-M2-4

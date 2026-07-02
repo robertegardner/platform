@@ -90,11 +90,11 @@
       "usb_controller": "B"
     },
     "nooelec-wx": {
-      "_comment": "Nooelec NESDR SMArt v5 (RTL2838, serial 22012952) on the GOES Pi goes.srvr (192.168.6.134), with a tuned Meteor antenna + an EXTERNALLY POWERED LNA (so bias_tee stays false; the Nooelec has none). Served over rtl_tcp by wxsat-rtltcp.service (serial-pinned + hard-fail) so it can NEVER steal the GOES SMArTee (47360874, which goes.service pins by serial); the rack radio-compute wxsat scheduler records this rtl_tcp and decodes Meteor-M2 LRPT on .84. Enumeration is NOT stable — the Nooelec came up index 0, the SMArTee index 1 — hence strict serial selection on both. RTL gain stays LOW (7.2 dB); the LNA provides gain (40 dB stacked clips). Moved here from p24 2026-07-01 (p24's ADS-B role untouched). HISTORY: this dongle showed flaky tuner comms on p24 (rtl_test r82xx_init failed=-1, prior NOSYNC); watch it. See memory wxsat-meteor-on-p24.",
+      "_comment": "Nooelec SMArTee XTR v5ee (RTL2838/E4000, serial 74111838 — replaced the flaky NESDR SMArt v5 22012952 on 2026-07-01 after its USB-level death) on the GOES Pi goes.srvr (192.168.6.134), with a tuned Meteor antenna + an EXTERNALLY POWERED LNA (bias_tee stays false). Gain = AGC (E4000; WXSAT_GAIN_TENTHS empty). Served over rtl_tcp by wxsat-rtltcp.service (serial-pinned + hard-fail) so it can NEVER steal the GOES SMArTee (47360874, which goes.service pins by serial); the rack radio-compute wxsat scheduler records this rtl_tcp and decodes Meteor-M2 LRPT on .84. Enumeration is NOT stable — the Nooelec came up index 0, the SMArTee index 1 — hence strict serial selection on both. RTL gain stays LOW (7.2 dB); the LNA provides gain (40 dB stacked clips). Moved here from p24 2026-07-01 (p24's ADS-B role untouched). HISTORY: this dongle showed flaky tuner comms on p24 (rtl_test r82xx_init failed=-1, prior NOSYNC); watch it. See memory wxsat-meteor-on-p24.",
       "present": true,
       "host": "goes.srvr",
       "soapy_args": "driver=rtlsdr",
-      "serial": "22012952",
+      "serial": "74111838",
       "antenna": "single",
       "feed": "tuned Meteor antenna + externally powered LNA",
       "filter": "external LNA (powered)",
