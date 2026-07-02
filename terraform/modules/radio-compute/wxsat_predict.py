@@ -40,8 +40,13 @@ PASSES_PATH = Path(os.environ.get("WXSAT_PASSES_PATH",
 # default but can be enabled from wxsat.env.
 # ---------------------------------------------------------------------------
 CATALOG = [
-    {"name": "METEOR-M2 4", "norad": 59051, "flag": "M2_4_ENABLED", "default": "1"},
-    {"name": "METEOR-M2 3", "norad": 57166, "flag": "M2_3_ENABLED", "default": "0"},
+    # lrpt_pipeline is per-satellite: M2-4 downlinks 80k symbols, M2-3 72k.
+    # The capture script still auto-falls-back to the other rate, so a wrong
+    # entry costs one decode timeout, not the pass.
+    {"name": "METEOR-M2 4", "norad": 59051, "flag": "M2_4_ENABLED", "default": "1",
+     "lrpt_pipeline": "meteor_m2-x_lrpt_80k"},
+    {"name": "METEOR-M2 3", "norad": 57166, "flag": "M2_3_ENABLED", "default": "0",
+     "lrpt_pipeline": "meteor_m2-x_lrpt"},
 ]
 
 
@@ -191,6 +196,7 @@ def compute_passes(cfg):
                 "los_iso": fall.replace(tzinfo=timezone.utc).isoformat(),
                 "max_elev": round(max_elev, 1),
                 "duration_min": round((los_u - aos_u) / 60.0, 1),
+                "lrpt_pipeline": sat.get("lrpt_pipeline"),
                 "source": "ours",   # our SGP4 / Space-Track prediction
             })
     passes.sort(key=lambda p: p["aos_unix"])

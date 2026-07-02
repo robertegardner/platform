@@ -55,7 +55,8 @@ def do_capture(p, cfg):
     meta = dict(p)
     meta.update({"duration_s": duration, "samplerate": int(cfg["samplerate"]),
                  "freq_hz": int(cfg["freq_mhz"] * 1e6),
-                 "lrpt_pipeline": cfg["lrpt_pipeline"]})
+                 # Per-satellite symbol rate (predict catalog); env is the fallback.
+                 "lrpt_pipeline": p.get("lrpt_pipeline") or cfg["lrpt_pipeline"]})
     tmp = out_dir / "passmeta.json.tmp"
     tmp.write_text(json.dumps(meta))
     os.replace(tmp, out_dir / "passmeta.json")
@@ -169,6 +170,7 @@ def main():
         sat = cfg["satellites"][0] if cfg["satellites"] else {"name": "TEST", "norad": 0}
         secs = max(30, args.capture_now)
         p = {"satellite": sat["name"], "norad": sat["norad"], "aos_unix": now,
+             "lrpt_pipeline": sat.get("lrpt_pipeline"),
              "los_unix": now + secs,
              "aos_iso": datetime.now(timezone.utc).isoformat(),
              "los_iso": datetime.fromtimestamp(now + secs, timezone.utc).isoformat(),
