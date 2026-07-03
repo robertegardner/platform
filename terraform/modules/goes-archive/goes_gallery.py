@@ -54,6 +54,23 @@ IMAGES_ROOT = os.path.join(ARCHIVE, "IMAGES", SAT)
 DERIVED = os.environ.get("GOES_DERIVED_DIR", os.path.join(ARCHIVE, "derived"))
 PREFERRED = os.environ.get("GOES_PREFERRED_COMPOSITE",
                            "abi_rgb_Clean_Longwave_IR_Window_Band")
+# Headline prefers the visible-based False Color by DAY and falls back to the
+# IR PREFERRED when the Cape crop is dark (False Color goes black at night —
+# a luminance check beats sun-angle math and self-corrects at dusk/dawn).
+DAY_PREFERRED = os.environ.get("GOES_HEADLINE_DAY_COMPOSITE",
+                               "abi_rgb_ABI_False_Color")
+DARK_MEAN = float(os.environ.get("GOES_HEADLINE_DARK_MEAN", "16"))
+# GeoColor is a CIRA product built from GRB-only bands (1 + 3 + the night
+# blend) that HRIT simply does not carry — the ONE gallery item fetched from
+# the internet (NOAA STAR CDN), and it is labeled as such in the UI.
+GEOCOLOR_URL = os.environ.get(
+    "GOES_GEOCOLOR_URL",
+    "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/FD/GEOCOLOR/1808x1808.jpg")
+GEOCOLOR_FULL_URL = os.environ.get(
+    "GOES_GEOCOLOR_FULL_URL",
+    "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/FD/GEOCOLOR/5424x5424.jpg")
+GEOCOLOR_REFRESH_S = int(os.environ.get("GOES_GEOCOLOR_REFRESH_S", "600"))
+GEOCOLOR_PATH = os.path.join(DERIVED, "internet", "geocolor_fd.jpg")
 CROP_BOX = tuple(int(x) for x in
                  os.environ.get("GOES_CROP_BOX", "1878,758,2321,1000").split(","))
 HOME_LAT = float(os.environ.get("GOES_HOME_LAT", "37.30"))
@@ -462,6 +479,21 @@ def _image_url(relpath):
     return (PUBLIC_BASE + u) if PUBLIC_BASE else u
 
 
+def _crop_is_dark(relpath):
+    """True if a (small) crop image is essentially black — nighttime for a
+    visible-band composite. Errs dark on any problem so the IR fallback wins."""
+    p = _safe_path(relpath)
+    if not p:
+        return True
+    try:
+        from PIL import ImageStat
+        with Image.open(p) as im:
+            im.thumbnail((64, 64))
+            return ImageStat.Stat(im.convert("L")).mean[0] < DARK_MEAN
+    except (OSError, ValueError):
+        return True
+
+
 def headline():
     """The current local image: the Cape-cropped Full Disk by default (a fixed,
     clearly-local zoom). Optionally a fresh local mesoscale when GOES_HEADLINE_PREFER_MESO
@@ -493,10 +525,20 @@ def headline():
     #    instead of the Clean Longwave IR satellite view.
     fd = next((c for c in caps if c.get("group") == "Full Disk"), None)
     if fd:
-        comp = (PREFERRED + ".png") if (PREFERRED + ".png") in fd["composites"] \
+        ir = (PREFERRED + ".png") if (PREFERRED + ".png") in fd["composites"] \
             else (fd["composites"][0] if fd["composites"] else fd["preferred"])
-        rel = _ensure_crop(fd, comp) if comp else None
-        if rel:
+        # Day preference: False Color when it actually has daylight, else IR.
+        candidates = []
+        if (DAY_PREFERRED + ".png") in fd["composites"]:
+            candidates.append(DAY_PREFERRED + ".png")
+        if ir and ir not in candidates:
+            candidates.append(ir)
+        for comp in candidates:
+            rel = _ensure_crop(fd, comp)
+            if not rel:
+                continue
+            if comp == DAY_PREFERRED + ".png" and _crop_is_dark(rel):
+                continue                       # nighttime — fall through to IR
             return {"satellite": SAT, "sector": "Full Disk", "source": "fulldisk-crop",
                     "composite": comp, "timestamp": fd["timestamp"],
                     "age_sec": int(now - fd["timestamp"]),
@@ -923,7 +965,9 @@ body{background:radial-gradient(circle at 50% -10%,#13233a 0%,var(--bg) 60%);col
 header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 header h1{font-size:1.05rem;font-weight:650}.dim{color:var(--dim);font-size:.82rem}
 .wrap{max-width:1200px;margin:0 auto;padding:1.2rem}
-.hero{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:1.4rem}
+.heros{display:grid;grid-template-columns:3fr 2fr;gap:.9rem;margin-bottom:1.4rem}
+@media(max-width:820px){.heros{grid-template-columns:1fr}}
+.hero{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
 .hero img{display:block;width:100%;height:auto;background:#000}
 .hero .cap{padding:.7rem 1rem;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;font-size:.85rem;color:var(--dim)}
 .tabs{display:flex;gap:.5rem;margin:0 0 1rem;flex-wrap:wrap}
@@ -949,7 +993,10 @@ dialog .dh select,dialog .dh button{background:#1a2433;color:var(--text);border:
 </style></head><body>
 <header><h1>🛰 GOES-19 HRIT</h1><span class="dim" id="sub">live archive · Cape Girardeau</span><a href="/emwin" style="margin-left:auto;color:var(--accent);text-decoration:none;font-size:.9rem">📰 EMWIN ▸</a><span class="dim" id="space" style="margin-left:1rem"></span></header>
 <div class="wrap">
-<div class="hero"><img id="hero" alt="latest local image"><div class="cap"><span id="herometa">loading…</span><span class="dim">headline · auto local</span></div></div>
+<div class="heros">
+<div class="hero"><img id="hero" alt="latest local image"><div class="cap"><span id="herometa">loading…</span><span class="dim">headline · self-received</span></div></div>
+<div class="hero" id="gcbox" style="display:none;cursor:pointer" title="open full resolution"><img id="gchero" alt="GeoColor (NOAA CDN)"><div class="cap"><span id="gcmeta">loading…</span><span class="dim">🌐 GeoColor · NOAA CDN (not HRIT)</span></div></div>
+</div>
 <div class="tabs" id="tabs"></div>
 <div class="grid" id="grid"><div class="empty">loading…</div></div>
 </div>
@@ -963,7 +1010,14 @@ function ago(s){if(s<90)return s+'s ago';if(s<5400)return Math.round(s/60)+'m ag
 function loadHero(){fetch('/api/goes/latest',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){
   if(!d||!d.image_url){$('herometa').textContent='no captures yet';return;}
   $('hero').src=d.image_url+(d.image_url.indexOf('?')<0?'?t='+d.timestamp:'');
-  $('herometa').innerHTML=esc(d.sector)+' · '+esc((d.source||'').replace('-',' '))+' · '+fmt(d.timestamp)+' ('+ago(d.age_sec||0)+')';
+  $('herometa').innerHTML=esc((d.composite||'').replace('abi_rgb_','').replace(/_/g,' ').replace('.png',''))+' · '+esc(d.sector)+' · '+fmt(d.timestamp)+' ('+ago(d.age_sec||0)+')';
+}).catch(function(){})}
+function loadGeo(){fetch('/api/goes/internet/geocolor',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){
+  if(!d||!d.available){$('gcbox').style.display='none';return;}
+  $('gcbox').style.display='';
+  $('gchero').src=d.image_url+'?t='+d.timestamp;
+  $('gcmeta').textContent='Full Disk · '+fmt(d.timestamp)+' ('+ago(d.age_sec||0)+')';
+  $('gcbox').onclick=function(){window.open(d.full_url,'_blank','noopener')};
 }).catch(function(){})}
 function tabs(){$('tabs').innerHTML=GROUPS.map(function(g){return '<button class="tab'+(g.group===cur?' on':'')+'" data-s="'+esc(g.group)+'">'+esc(g.group)+' <small style="opacity:.6">'+g.count+'</small></button>'}).join('');
   Array.prototype.forEach.call($('tabs').children,function(b){b.onclick=function(){cur=b.getAttribute('data-s');tabs();loadCaps();}});}
@@ -1003,7 +1057,7 @@ $('dlgx').onclick=function(){$('dlg').close()};
 function loadGroups(){fetch('/api/goes/groups',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){GROUPS=d.groups||[];if(!cur&&GROUPS.length)cur=GROUPS[0].group;tabs();loadCaps();}).catch(function(){})}
 function loadCaps(){if(!cur)return;fetch('/api/goes/captures?group='+encodeURIComponent(cur)+'&recent=180',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){CAPS=d.captures||[];render();}).catch(function(){})}
 function loadSpace(){fetch('/api/goes/space',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){if(d.free_gb!=null)$('space').textContent=d.free_gb+' GB free · '+(d.captures||0)+' captures';}).catch(function(){})}
-loadHero();loadGroups();loadSpace();setInterval(loadHero,60000);setInterval(function(){loadGroups();loadCaps();},60000);
+loadHero();loadGeo();loadGroups();loadSpace();setInterval(loadHero,60000);setInterval(loadGeo,120000);setInterval(function(){loadGroups();loadCaps();},60000);
 </script></body></html>"""
 
 
@@ -1178,6 +1232,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._file(p)
         elif path == "/api/goes/latest":
             self._json(200, headline())
+        elif path == "/api/goes/internet/geocolor":
+            try:
+                ts = int(os.path.getmtime(GEOCOLOR_PATH))
+                rel = os.path.relpath(GEOCOLOR_PATH, ARCHIVE)
+                self._json(200, {"available": True, "source": "noaa-cdn",
+                                 "timestamp": ts, "age_sec": int(time.time() - ts),
+                                 "image_url": _image_url(rel),
+                                 "full_url": GEOCOLOR_FULL_URL})
+            except OSError:
+                self._json(200, {"available": False, "source": "noaa-cdn"})
         elif path == "/api/goes/groups":
             # Distinct browse tabs (ordered) with counts + newest timestamp.
             order = {"Full Disk": 0, "Mesoscale 1": 1, "Mesoscale 2": 2}
@@ -1245,9 +1309,50 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
 
 
+def _geocolor_loop():
+    """Background worker: keep the NOAA-CDN GeoColor Full Disk fresh (10-min
+    product). Conditional GET so an unchanged CDN image costs one 304; the file
+    mtime is set from Last-Modified so age_sec reports scan age, not fetch age."""
+    import email.utils
+    import urllib.error
+    import urllib.request
+    os.makedirs(os.path.dirname(GEOCOLOR_PATH), exist_ok=True)
+    while True:
+        try:
+            req = urllib.request.Request(
+                GEOCOLOR_URL, headers={"User-Agent": "goes-archive-gallery/1.0"})
+            try:
+                req.add_header("If-Modified-Since", email.utils.formatdate(
+                    os.path.getmtime(GEOCOLOR_PATH), usegmt=True))
+            except OSError:
+                pass
+            try:
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    data = r.read()
+                    lm = r.headers.get("Last-Modified")
+                if data[:3] == b"\xff\xd8\xff":            # JPEG magic — sane body
+                    tmp = GEOCOLOR_PATH + ".tmp"
+                    with open(tmp, "wb") as f:
+                        f.write(data)
+                    os.replace(tmp, GEOCOLOR_PATH)
+                    if lm:
+                        try:
+                            ts = email.utils.parsedate_to_datetime(lm).timestamp()
+                            os.utime(GEOCOLOR_PATH, (ts, ts))
+                        except (TypeError, ValueError):
+                            pass
+            except urllib.error.HTTPError as e:
+                if e.code != 304:                          # 304 = still current
+                    raise
+        except Exception as e:
+            log(f"geocolor fetch failed: {e}")
+        time.sleep(GEOCOLOR_REFRESH_S)
+
+
 def main():
     os.makedirs(DERIVED, exist_ok=True)
     threading.Thread(target=_pregen_loop, daemon=True, name="pregen").start()
+    threading.Thread(target=_geocolor_loop, daemon=True, name="geocolor").start()
     log(f"goes-gallery on :{PORT} archive={ARCHIVE} sat={SAT} "
         f"preferred={PREFERRED} crop={CROP_BOX} cbor2={cbor2 is not None} "
         f"home_scan={HOME_SCAN} thumb={THUMB_W} preview={PREVIEW_W}")
