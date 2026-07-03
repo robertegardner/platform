@@ -94,10 +94,13 @@ cat > /usr/local/sbin/goes-archive-prune.sh <<EOF
 # platform-managed (goes-archive): drop products older than the retention window.
 set -uo pipefail
 A="$ARCHIVE"
-[ -d "\$A/IMAGES" ] && find "\$A/IMAGES" -mindepth 3 -maxdepth 3 -type d -mtime +${retention_days} -exec rm -rf {} + 2>/dev/null
-[ -d "\$A/EMWIN" ] && find "\$A/EMWIN" -type f -mtime +${retention_days} -delete 2>/dev/null
+# -mmin (exact) not -mtime: find's "-mtime +N" truncates to whole days and only
+# matches at age >= N+1 days — a whole extra day of ~13 GB the volume can't spare.
+[ -d "\$A/IMAGES" ] && find "\$A/IMAGES" -mindepth 3 -maxdepth 3 -type d -mmin +${retention_days * 1440} -exec rm -rf {} + 2>/dev/null
+[ -d "\$A/L2" ] && find "\$A/L2" -mindepth 3 -maxdepth 3 -type d -mmin +${retention_days * 1440} -exec rm -rf {} + 2>/dev/null
+[ -d "\$A/EMWIN" ] && find "\$A/EMWIN" -type f -mmin +${retention_days * 1440} -delete 2>/dev/null
 # Derived crops/thumbs regenerate on demand — age them out too, then drop empties.
-[ -d "\$A/derived" ] && find "\$A/derived" -type f -mtime +${retention_days} -delete 2>/dev/null
+[ -d "\$A/derived" ] && find "\$A/derived" -type f -mmin +${retention_days * 1440} -delete 2>/dev/null
 [ -d "\$A/derived" ] && find "\$A/derived" -mindepth 1 -type d -empty -delete 2>/dev/null
 exit 0
 EOF

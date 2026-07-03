@@ -167,6 +167,10 @@ module "goes_archive" {
 
   goes_host     = var.goes_host
   goes_ssh_user = var.goes_ssh_user
+  # 3 days: the 63 GB volume can't hold the 7-day default (~13.3 GB/day HRIT
+  # measured 2026-07 ⇒ ~96 GB steady state; 3 days ≈ 43 GB). Raise only after
+  # growing the LXC disk.
+  archive_retention_days = 3
 }
 
 # Tier 3 (extra) — adsb-feeder LXC: the ultrafeeder ADS-B hub. Ingests p24's
